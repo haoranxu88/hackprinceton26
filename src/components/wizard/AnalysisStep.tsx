@@ -1,7 +1,6 @@
 import { useEffect, useState, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
 import { useMockToggle } from "@/hooks/useMockToggle";
 import { mockAnalysis, type ExposureAnalysis } from "@/data/mock-analysis";
 import { mockLawsuits } from "@/data/mock-lawsuits";
@@ -10,7 +9,7 @@ import { analyzeExposure, matchOpportunities } from "@/lib/api";
 import type { Transaction } from "@/data/mock-transactions";
 import type { Lawsuit } from "@/data/mock-lawsuits";
 import type { ClinicalTrial } from "@/data/mock-trials";
-import { Scan, FlaskConical, AlertTriangle, CheckCircle2, Cpu } from "lucide-react";
+import { Cpu } from "lucide-react";
 
 interface AnalysisStepProps {
   transactions: Transaction[];
@@ -18,10 +17,10 @@ interface AnalysisStepProps {
 }
 
 const STAGES = [
-  { label: "Scanning product labels", icon: Scan, duration: 1200 },
-  { label: "Cross-referencing EPA chemical database", icon: FlaskConical, duration: 1500 },
-  { label: "Calculating exposure scores", icon: AlertTriangle, duration: 1000 },
-  { label: "Matching legal & clinical opportunities", icon: CheckCircle2, duration: 800 },
+  { label: "Scanning product labels", duration: 1200 },
+  { label: "Cross-referencing EPA chemical database", duration: 1500 },
+  { label: "Calculating exposure scores", duration: 1000 },
+  { label: "Matching legal & clinical opportunities", duration: 800 },
 ];
 
 const DISCOVERED_CHEMICALS = [
@@ -42,7 +41,6 @@ export function AnalysisStep({ transactions, onComplete }: AnalysisStepProps) {
 
     const runAnalysis = async () => {
       if (isMock) {
-        // Animate through stages with mock data
         for (let i = 0; i < STAGES.length; i++) {
           setStage(i);
           const startProgress = (i / STAGES.length) * 100;
@@ -57,7 +55,6 @@ export function AnalysisStep({ transactions, onComplete }: AnalysisStepProps) {
         onComplete(mockAnalysis, mockLawsuits, mockTrials);
       } else {
         try {
-          // Extract all products from transactions
           const allProducts = transactions.flatMap((t) =>
             (t.products || []).map((p) => ({
               name: p.name || "Unknown Product",
@@ -65,50 +62,29 @@ export function AnalysisStep({ transactions, onComplete }: AnalysisStepProps) {
             }))
           ).filter((p) => p.name && p.name !== "Unknown Product");
 
-          console.log("[analysis] Products to analyze:", allProducts.length, allProducts.slice(0, 3));
-
           if (allProducts.length === 0) {
-            console.warn("[analysis] No products found, using mock data");
             completedRef.current = true;
             onComplete(mockAnalysis, mockLawsuits, mockTrials);
             return;
           }
 
-          // Stage 1: Scan products
-          setStage(0);
-          setProgress(15);
+          setStage(0); setProgress(15);
           await new Promise((r) => setTimeout(r, 500));
-
-          // Stage 2: Analyze with Gemini via Edge Function
-          setStage(1);
-          setProgress(30);
-          console.log("[analysis] Calling analyze-exposure with", allProducts.length, "products");
+          setStage(1); setProgress(30);
           const analysisResult = await analyzeExposure(allProducts);
-          console.log("[analysis] Result:", JSON.stringify(analysisResult).slice(0, 300));
           if (analysisResult?._provider) setAiProvider(analysisResult._provider);
 
-          // Stage 3: Calculate scores
-          setStage(2);
-          setProgress(60);
-          const chemicals = analysisResult?.chemicals?.map(
-            (c: { chemical: string }) => c.chemical
-          ) ?? [];
-          console.log("[analysis] Chemicals found:", chemicals);
+          setStage(2); setProgress(60);
+          const chemicals = analysisResult?.chemicals?.map((c: { chemical: string }) => c.chemical) ?? [];
 
           if (chemicals.length === 0) {
-            console.warn("[analysis] No chemicals found, using mock data");
             completedRef.current = true;
             onComplete(analysisResult || mockAnalysis, mockLawsuits, mockTrials);
             return;
           }
 
-          // Stage 4: Match opportunities
-          setStage(3);
-          setProgress(80);
-          console.log("[analysis] Calling match-opportunities with", chemicals.length, "chemicals");
+          setStage(3); setProgress(80);
           const opportunities = await matchOpportunities(chemicals);
-          console.log("[analysis] Opportunities:", JSON.stringify(opportunities).slice(0, 300));
-
           setProgress(100);
           completedRef.current = true;
           onComplete(
@@ -116,8 +92,7 @@ export function AnalysisStep({ transactions, onComplete }: AnalysisStepProps) {
             opportunities?.lawsuits ?? mockLawsuits,
             opportunities?.trials ?? mockTrials
           );
-        } catch (err) {
-          console.error("[analysis] Error, falling back to mock:", err);
+        } catch {
           completedRef.current = true;
           onComplete(mockAnalysis, mockLawsuits, mockTrials);
         }
@@ -127,64 +102,100 @@ export function AnalysisStep({ transactions, onComplete }: AnalysisStepProps) {
     runAnalysis();
   }, [isMock, transactions, onComplete]);
 
-  // Discover chemicals one by one
   useEffect(() => {
     if (discoveredIdx >= DISCOVERED_CHEMICALS.length) return;
-    const timer = setTimeout(() => {
-      setDiscoveredIdx((prev) => prev + 1);
-    }, 700);
+    const timer = setTimeout(() => setDiscoveredIdx((prev) => prev + 1), 700);
     return () => clearTimeout(timer);
   }, [discoveredIdx]);
 
-  const currentStage = STAGES[Math.min(stage, STAGES.length - 1)];
   const totalProducts = transactions.reduce((sum, t) => sum + (t.products?.length || 0), 0);
+  const progressPct = Math.round(progress);
 
   return (
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="flex flex-col items-center justify-center min-h-[70vh] px-4"
+      className="max-w-xl mx-auto px-6 pt-16 pb-12 flex flex-col"
     >
-      <div className="relative mb-8">
-        <div className="w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center">
-          <currentStage.icon className="w-9 h-9 text-primary" />
-        </div>
-        <div className="absolute inset-0 w-20 h-20 rounded-full border-2 border-primary/30 animate-pulse-ring" />
-      </div>
+      <span className="text-eyebrow mb-3">Step 02</span>
 
-      <h2 className="text-xl sm:text-2xl font-bold text-foreground mb-2 text-center">
-        Analyzing Your Products
+      <h2 className="font-display text-3xl sm:text-4xl font-bold text-foreground tracking-tight mb-2">
+        Analyzing your products
       </h2>
-      <p className="text-muted-foreground text-sm mb-6 text-center max-w-md">
-        {currentStage.label}...
+
+      <p className="text-sm text-muted-foreground mb-10">
+        {STAGES[Math.min(stage, STAGES.length - 1)].label}…
       </p>
 
-      <div className="w-full max-w-sm mb-8">
-        <Progress value={progress} className="h-2" />
-        <p className="text-xs text-muted-foreground mt-2 text-center">
-          {Math.round(progress)}% complete
-        </p>
+      {/* Progress track */}
+      <div className="mb-10">
+        <div className="h-px w-full bg-border relative overflow-hidden">
+          <motion.div
+            className="absolute inset-y-0 left-0 bg-foreground"
+            initial={{ width: "0%" }}
+            animate={{ width: `${progressPct}%` }}
+            transition={{ duration: 0.3 }}
+          />
+        </div>
+        <div className="flex justify-between mt-2">
+          <span className="text-xs text-muted-foreground font-body">{progressPct}% complete</span>
+          <span className="text-xs text-muted-foreground font-body">
+            {totalProducts} products · {transactions.length} orders
+          </span>
+        </div>
       </div>
 
-      <div className="flex flex-wrap justify-center gap-2 max-w-lg">
+      {/* Stage list */}
+      <div className="space-y-3 mb-10">
+        {STAGES.map((s, i) => (
+          <div key={s.label} className="flex items-center gap-3">
+            <div
+              className="w-1.5 h-1.5 rounded-full shrink-0"
+              style={{
+                background: i < stage
+                  ? "hsl(142, 65%, 38%)"
+                  : i === stage
+                  ? "hsl(38, 90%, 50%)"
+                  : "hsl(var(--border))",
+              }}
+            />
+            <span
+              className="text-xs font-body"
+              style={{
+                color: i < stage
+                  ? "hsl(142, 65%, 38%)"
+                  : i === stage
+                  ? "hsl(var(--foreground))"
+                  : "hsl(var(--muted-foreground))",
+                opacity: i > stage ? 0.4 : 1,
+              }}
+            >
+              {s.label}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      {/* Chemical discovery */}
+      <div className="flex flex-wrap gap-2">
         <AnimatePresence>
           {DISCOVERED_CHEMICALS.slice(0, discoveredIdx).map((chem) => (
             <motion.div
               key={chem}
-              initial={{ opacity: 0, scale: 0.5 }}
+              initial={{ opacity: 0, scale: 0.8 }}
               animate={{ opacity: 1, scale: 1 }}
-              transition={{ type: "spring", stiffness: 300, damping: 20 }}
+              transition={{ type: "spring", stiffness: 300, damping: 22 }}
             >
               <Badge
                 variant={
                   chem === "Benzene" || chem.includes("Talc")
                     ? "critical"
                     : chem === "Formaldehyde"
-                      ? "high"
-                      : "moderate"
+                    ? "high"
+                    : "moderate"
                 }
-                className="text-xs"
+                className="text-xs font-body"
               >
                 {chem}
               </Badge>
@@ -193,12 +204,8 @@ export function AnalysisStep({ transactions, onComplete }: AnalysisStepProps) {
         </AnimatePresence>
       </div>
 
-      <p className="text-xs text-muted-foreground mt-6">
-        Scanning {totalProducts} products across {transactions.length} orders
-      </p>
-
       {aiProvider && (
-        <div className="mt-3 flex items-center gap-1.5 text-xs text-muted-foreground/70">
+        <div className="mt-8 flex items-center gap-1.5 text-xs text-muted-foreground/60 font-body">
           <Cpu className="w-3 h-3" />
           <span>
             Powered by{" "}

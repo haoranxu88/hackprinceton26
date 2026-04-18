@@ -1,10 +1,8 @@
 import { useState } from "react";
-import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
 import type { Lawsuit } from "@/data/mock-lawsuits";
-import { Scale, Clock, ChevronDown, ChevronUp, FileText } from "lucide-react";
+import { Clock, ChevronDown, ChevronUp, FileText } from "lucide-react";
 
 interface LawsuitCardProps {
   lawsuit: Lawsuit;
@@ -13,92 +11,105 @@ interface LawsuitCardProps {
 export function LawsuitCard({ lawsuit }: LawsuitCardProps) {
   const [expanded, setExpanded] = useState(false);
 
-  const daysUntilDeadline = lawsuit.deadline !== "TBD"
-    ? Math.max(0, Math.ceil((new Date(lawsuit.deadline).getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
-    : null;
+  const daysUntilDeadline =
+    lawsuit.deadline !== "TBD"
+      ? Math.max(0, Math.ceil((new Date(lawsuit.deadline).getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
+      : null;
+
+  const isActive = lawsuit.status === "active";
 
   return (
-    <Card className="overflow-hidden hover:shadow-elegant transition-all duration-300">
-      <CardHeader className="p-4 pb-3">
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex items-start gap-3 min-w-0">
-            <div className="w-10 h-10 rounded-xl bg-accent/10 flex items-center justify-center shrink-0">
-              <Scale className="w-5 h-5 text-accent" />
-            </div>
-            <div className="min-w-0">
-              <CardTitle className="text-sm leading-tight">{lawsuit.title}</CardTitle>
-              <p className="text-xs text-muted-foreground mt-0.5">vs. {lawsuit.defendant}</p>
-            </div>
-          </div>
-          <Badge variant={lawsuit.status === "active" ? "default" : "secondary"} className="shrink-0 text-[10px]">
-            {lawsuit.status}
-          </Badge>
+    <div className="surface p-5 flex flex-col gap-4 transition-shadow duration-200 hover:shadow-card-hover">
+      {/* Header */}
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-foreground leading-snug mb-0.5">{lawsuit.title}</p>
+          <p className="text-xs text-muted-foreground">vs. {lawsuit.defendant}</p>
         </div>
-      </CardHeader>
+        <span
+          className={`shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-sm font-body ${
+            isActive ? "bg-accent/15 text-accent-foreground" : "bg-secondary text-muted-foreground"
+          }`}
+        >
+          {lawsuit.status}
+        </span>
+      </div>
 
-      <CardContent className="px-4 pb-3 space-y-3">
-        <div className="grid grid-cols-3 gap-2 text-center">
-          <div className="p-2 rounded-lg bg-muted/50">
-            <p className="text-xs text-muted-foreground">Settlement</p>
-            <p className="text-sm font-bold text-foreground">{lawsuit.settlementAmount}</p>
-          </div>
-          <div className="p-2 rounded-lg bg-muted/50">
-            <p className="text-xs text-muted-foreground">Match</p>
-            <p className="text-sm font-bold text-primary">{lawsuit.matchConfidence}%</p>
-          </div>
-          <div className="p-2 rounded-lg bg-muted/50">
-            <p className="text-xs text-muted-foreground">Deadline</p>
-            <p className="text-sm font-bold text-foreground flex items-center justify-center gap-1">
-              <Clock className="w-3 h-3" />
-              {daysUntilDeadline !== null ? `${daysUntilDeadline}d` : "TBD"}
-            </p>
-          </div>
+      {/* Settlement — typographically prominent */}
+      <div>
+        <p className="text-[10px] text-muted-foreground uppercase tracking-widest font-body mb-1">Settlement</p>
+        <p className="font-display text-2xl font-bold text-foreground">{lawsuit.settlementAmount}</p>
+      </div>
+
+      {/* Match confidence bar */}
+      <div>
+        <div className="flex justify-between mb-1.5">
+          <span className="text-[10px] text-muted-foreground uppercase tracking-widest font-body">Match confidence</span>
+          <span className="text-xs font-semibold text-foreground font-body">{lawsuit.matchConfidence}%</span>
         </div>
-
-        <div className="flex flex-wrap gap-1">
-          {lawsuit.matchedChemicals.map((c) => (
-            <Badge key={c} variant="critical" className="text-[10px]">{c}</Badge>
-          ))}
-          {lawsuit.matchedProducts.map((p) => (
-            <Badge key={p} variant="outline" className="text-[10px] text-foreground">{p}</Badge>
-          ))}
+        <div className="h-1 rounded-full bg-muted overflow-hidden">
+          <div
+            className="h-full rounded-full bg-foreground/80"
+            style={{ width: `${lawsuit.matchConfidence}%` }}
+          />
         </div>
+      </div>
 
-        {expanded && (
-          <>
-            <Separator />
-            <p className="text-xs text-muted-foreground leading-relaxed">{lawsuit.description}</p>
-            <div className="space-y-2">
-              <p className="text-xs font-semibold text-foreground">Payout Tiers:</p>
+      {/* Tags */}
+      <div className="flex flex-wrap gap-1.5">
+        {lawsuit.matchedChemicals.map((c) => (
+          <Badge key={c} variant="critical" className="text-[10px] font-body">{c}</Badge>
+        ))}
+        {lawsuit.matchedProducts.map((p) => (
+          <Badge key={p} variant="outline" className="text-[10px] font-body text-foreground">{p}</Badge>
+        ))}
+      </div>
+
+      {/* Deadline */}
+      {daysUntilDeadline !== null && (
+        <div className="flex items-center gap-1.5 text-xs text-muted-foreground font-body">
+          <Clock className="w-3 h-3" />
+          <span>
+            {daysUntilDeadline > 0 ? `${daysUntilDeadline} days until deadline` : "Deadline passed"}
+          </span>
+        </div>
+      )}
+
+      {/* Expanded details */}
+      {expanded && (
+        <div className="pt-1 border-t border-border/50 space-y-3">
+          <p className="text-xs text-muted-foreground leading-relaxed font-body">{lawsuit.description}</p>
+          <div>
+            <p className="text-xs font-semibold text-foreground mb-2">Payout tiers</p>
+            <div className="space-y-1.5">
               {lawsuit.payoutTiers.map((tier) => (
-                <div key={tier.tier} className="flex items-center justify-between p-2 rounded-lg bg-muted/30 text-xs">
+                <div key={tier.tier} className="flex items-center justify-between text-xs py-2 border-t border-border/30 first:border-t-0">
                   <div>
-                    <p className="font-medium text-foreground">{tier.tier}</p>
-                    <p className="text-muted-foreground">{tier.requirement}</p>
+                    <p className="font-medium text-foreground font-body">{tier.tier}</p>
+                    <p className="text-muted-foreground font-body">{tier.requirement}</p>
                   </div>
-                  <span className="font-bold text-primary">{tier.amount}</span>
+                  <span className="font-semibold text-foreground font-body">{tier.amount}</span>
                 </div>
               ))}
             </div>
-          </>
-        )}
-      </CardContent>
+          </div>
+        </div>
+      )}
 
-      <CardFooter className="px-4 pb-4 gap-2">
-        <Button
-          variant="ghost"
-          size="sm"
+      {/* Actions */}
+      <div className="flex items-center gap-2 pt-1">
+        <button
           onClick={() => setExpanded(!expanded)}
-          className="text-xs gap-1"
+          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors font-body"
         >
           {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
           {expanded ? "Less" : "Details"}
-        </Button>
-        <Button variant="default" size="sm" className="ml-auto gap-1 text-xs">
+        </button>
+        <Button variant="hero" size="sm" className="ml-auto gap-1.5 text-xs font-body">
           <FileText className="w-3 h-3" />
-          File Claim
+          File claim
         </Button>
-      </CardFooter>
-    </Card>
+      </div>
+    </div>
   );
 }

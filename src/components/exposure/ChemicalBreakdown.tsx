@@ -22,15 +22,15 @@ export function ChemicalBreakdown({ chemicals }: ChemicalBreakdownProps) {
         <BarChart data={chartData} margin={{ top: 5, right: 5, left: -15, bottom: 5 }}>
           <XAxis
             dataKey="name"
-            tick={{ fontSize: 10, fill: "hsl(210, 10%, 45%)" }}
+            tick={{ fontSize: 10, fill: "hsl(222, 8%, 46%)" }}
             axisLine={false}
             tickLine={false}
           />
           <YAxis
-            tick={{ fontSize: 10, fill: "hsl(210, 10%, 45%)" }}
+            tick={{ fontSize: 10, fill: "hsl(222, 8%, 46%)" }}
             axisLine={false}
             tickLine={false}
-            label={{ value: "ppm", angle: -90, position: "insideLeft", fontSize: 10, fill: "hsl(210, 10%, 45%)" }}
+            label={{ value: "ppm", angle: -90, position: "insideLeft", fontSize: 10, fill: "hsl(222, 8%, 46%)" }}
           />
           <Tooltip
             contentStyle={{
