@@ -6,7 +6,7 @@ const corsHeaders = {
 
 // === AI PROVIDER CONFIG ===
 // Options: "enter" (default), "gemini", "dedalus"
-const AI_PROVIDER = "enter";
+const AI_PROVIDER = "dedalus";
 // ==========================
 
 async function callEnterAI(prompt: string): Promise<string> {
@@ -107,7 +107,6 @@ Focus on benzene, formaldehyde, talc, parabens, phthalates, PFAS, oxybenzone, al
     const rawText = await callProvider(prompt);
     const cleanJson = rawText.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
     const analysis = JSON.parse(cleanJson);
-    // Tag the provider for frontend display
     analysis._provider = AI_PROVIDER;
     console.log("[analyze] SUCCESS Score:", analysis.overallScore);
 

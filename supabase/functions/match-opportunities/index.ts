@@ -6,7 +6,7 @@ const corsHeaders = {
 
 // === AI PROVIDER CONFIG ===
 // Options: "enter" (default), "gemini", "dedalus"
-const AI_PROVIDER = "enter";
+const AI_PROVIDER = "dedalus";
 // ==========================
 
 async function callEnterAI(prompt: string): Promise<string> {
