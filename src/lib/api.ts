@@ -20,11 +20,18 @@ async function invokeEdgeFunction(functionName: string, body: Record<string, unk
   const { data, error } = await supabase.functions.invoke(functionName, { body });
 
   if (error) {
-    // Try to read the actual response body for detailed error info
+    // Try to extract the response body from the error context
+    let errorDetail = null;
+    try {
+      if (error.context && typeof error.context.json === "function") {
+        errorDetail = await error.context.json();
+      } else if (error.context && typeof error.context.text === "function") {
+        errorDetail = await error.context.text();
+      }
+    } catch (_) { /* ignore */ }
+    
     console.error(`[api] ${functionName} error:`, error);
-    if (data) {
-      console.error(`[api] ${functionName} error body:`, JSON.stringify(data));
-    }
+    console.error(`[api] ${functionName} error detail:`, errorDetail ?? data ?? "no detail");
     throw error;
   }
 

@@ -4,34 +4,6 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-async function callGeminiWithRetry(geminiKey: string, body: object, maxRetries = 3): Promise<{ ok: boolean; status: number; text: string }> {
-  const geminiUrl = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
-  
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
-    const resp = await fetch(geminiUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-goog-api-key": geminiKey,
-      },
-      body: JSON.stringify(body),
-    });
-
-    const text = await resp.text();
-
-    if (resp.status === 429 && attempt < maxRetries - 1) {
-      const waitMs = (attempt + 1) * 5000; // 5s, 10s, 15s
-      console.log(`Rate limited (429), waiting ${waitMs}ms before retry ${attempt + 1}/${maxRetries}...`);
-      await new Promise(r => setTimeout(r, waitMs));
-      continue;
-    }
-
-    return { ok: resp.ok, status: resp.status, text };
-  }
-
-  return { ok: false, status: 429, text: "Max retries exceeded" };
-}
-
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -39,9 +11,21 @@ Deno.serve(async (req) => {
 
   try {
     const geminiKey = Deno.env.get("GEMINI_API_KEY");
-    if (!geminiKey) throw new Error("GEMINI_API_KEY not configured");
+    console.log("[analyze] === START ===");
+    console.log("[analyze] GEMINI_API_KEY present:", !!geminiKey);
+    console.log("[analyze] Key prefix:", geminiKey ? geminiKey.slice(0, 12) + "..." : "MISSING");
+    console.log("[analyze] Key length:", geminiKey?.length);
 
-    const { products } = await req.json();
+    if (!geminiKey) {
+      return new Response(
+        JSON.stringify({ error: "GEMINI_API_KEY not configured" }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const body = await req.json();
+    const { products } = body;
+    console.log("[analyze] Products received:", products?.length);
 
     if (!products || !Array.isArray(products) || products.length === 0) {
       return new Response(
@@ -49,8 +33,6 @@ Deno.serve(async (req) => {
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
-
-    console.log(`Analyzing ${products.length} products.`);
 
     const productList = products
       .map((p: { name: string; description: string }, i: number) =>
@@ -68,46 +50,88 @@ Return ONLY valid JSON (no markdown, no code fences):
 
 Focus on benzene, formaldehyde, talc, parabens, phthalates, PFAS, oxybenzone, aluminum.`;
 
-    const result = await callGeminiWithRetry(geminiKey, {
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: {
-        temperature: 0.2,
-        maxOutputTokens: 4096,
-      },
-    });
+    const geminiUrl = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
 
-    console.log("Gemini status:", result.status);
+    // Attempt with retries
+    let lastStatus = 0;
+    let lastBody = "";
+    
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      console.log(`[analyze] Attempt ${attempt}/3 - calling Gemini...`);
+      const startTime = Date.now();
 
-    if (!result.ok) {
-      console.error("Gemini error:", result.text.slice(0, 500));
-      return new Response(
-        JSON.stringify({ 
-          error: `Gemini API returned ${result.status}`, 
-          detail: result.text.slice(0, 500)
+      const geminiResponse = await fetch(geminiUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": geminiKey,
+        },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: {
+            temperature: 0.2,
+            maxOutputTokens: 4096,
+          },
         }),
-        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      });
+
+      lastStatus = geminiResponse.status;
+      lastBody = await geminiResponse.text();
+      const elapsed = Date.now() - startTime;
+
+      console.log(`[analyze] Attempt ${attempt} status: ${lastStatus} (${elapsed}ms)`);
+      console.log(`[analyze] Attempt ${attempt} response preview: ${lastBody.slice(0, 300)}`);
+
+      if (lastStatus === 200) {
+        // Success! Parse and return
+        const geminiData = JSON.parse(lastBody);
+        const textContent = geminiData.candidates?.[0]?.content?.parts?.[0]?.text;
+        console.log("[analyze] Got text content, length:", textContent?.length);
+
+        if (!textContent) {
+          console.error("[analyze] Empty text content in response");
+          return new Response(
+            JSON.stringify({ error: "Empty Gemini response", raw: JSON.stringify(geminiData).slice(0, 300) }),
+            { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        const cleanJson = textContent.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+        console.log("[analyze] Clean JSON preview:", cleanJson.slice(0, 200));
+
+        const analysis = JSON.parse(cleanJson);
+        console.log("[analyze] === SUCCESS === Score:", analysis.overallScore, "Chemicals:", analysis.chemicals?.length);
+
+        return new Response(JSON.stringify(analysis), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      if (lastStatus === 429 && attempt < 3) {
+        const waitMs = attempt * 8000; // 8s, 16s
+        console.log(`[analyze] Rate limited! Waiting ${waitMs}ms...`);
+        await new Promise(r => setTimeout(r, waitMs));
+        continue;
+      }
+
+      // Non-retryable error
+      break;
     }
 
-    const geminiData = JSON.parse(result.text);
-    const textContent = geminiData.candidates?.[0]?.content?.parts?.[0]?.text;
+    // All attempts failed
+    console.error(`[analyze] === FAILED === Final status: ${lastStatus}`);
+    console.error(`[analyze] Final body: ${lastBody.slice(0, 500)}`);
 
-    if (!textContent) {
-      return new Response(
-        JSON.stringify({ error: "Empty Gemini response", raw: JSON.stringify(geminiData).slice(0, 300) }),
-        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    const cleanJson = textContent.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-    const analysis = JSON.parse(cleanJson);
-    console.log("Success! Score:", analysis.overallScore);
-
-    return new Response(JSON.stringify(analysis), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return new Response(
+      JSON.stringify({
+        error: `Gemini API returned ${lastStatus} after retries`,
+        detail: lastBody.slice(0, 500),
+        keyPrefix: geminiKey.slice(0, 12),
+      }),
+      { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
   } catch (error) {
-    console.error("analyze-exposure crash:", error.message);
+    console.error("[analyze] === CRASH ===", error.message, error.stack);
     return new Response(
       JSON.stringify({ error: error.message }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
