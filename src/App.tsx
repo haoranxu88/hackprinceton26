@@ -16,14 +16,6 @@ function App() {
         await supabase.auth.signInAnonymously();
       }
       setAuthReady(true);
-
-      // Debug: test if secrets are configured
-      try {
-        const { data } = await supabase.functions.invoke("debug-secrets");
-        console.log("[debug] Secrets check:", JSON.stringify(data, null, 2));
-      } catch (e) {
-        console.error("[debug] Secret check failed:", e);
-      }
     };
     initAuth();
   }, []);

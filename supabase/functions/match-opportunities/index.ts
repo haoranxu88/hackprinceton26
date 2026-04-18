@@ -4,6 +4,34 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+async function callGeminiWithRetry(geminiKey: string, body: object, maxRetries = 3): Promise<{ ok: boolean; status: number; text: string }> {
+  const geminiUrl = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    const resp = await fetch(geminiUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": geminiKey,
+      },
+      body: JSON.stringify(body),
+    });
+
+    const text = await resp.text();
+
+    if (resp.status === 429 && attempt < maxRetries - 1) {
+      const waitMs = (attempt + 1) * 5000;
+      console.log(`Rate limited (429), waiting ${waitMs}ms before retry ${attempt + 1}/${maxRetries}...`);
+      await new Promise(r => setTimeout(r, waitMs));
+      continue;
+    }
+
+    return { ok: resp.ok, status: resp.status, text };
+  }
+
+  return { ok: false, status: 429, text: "Max retries exceeded" };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -22,13 +50,13 @@ Deno.serve(async (req) => {
       );
     }
 
-    console.log("Matching opportunities for chemicals:", chemicals);
+    console.log("Matching opportunities for", chemicals.length, "chemicals");
 
     const prompt = `You are a legal and clinical trial matching expert. Given the following list of hazardous chemicals a consumer has been exposed to through retail products, find matching class action lawsuits and clinical trials.
 
 Chemicals detected: ${chemicals.join(", ")}
 
-Return a JSON object with this exact structure:
+Return ONLY valid JSON (no markdown, no code fences):
 {
   "lawsuits": [
     {
@@ -66,42 +94,39 @@ Return a JSON object with this exact structure:
   ]
 }
 
-Focus on real, well-known class action lawsuits and Regeneron clinical trials where possible. Only return the JSON, no other text.`;
+Focus on real, well-known class action lawsuits and Regeneron clinical trials where possible.`;
 
-    console.log("Calling Gemini API for opportunity matching...");
-    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`;
-
-    const geminiResponse = await fetch(geminiUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0.3,
-          maxOutputTokens: 4096,
-        },
-      }),
+    const result = await callGeminiWithRetry(geminiKey, {
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: {
+        temperature: 0.3,
+        maxOutputTokens: 4096,
+      },
     });
 
-    const responseText = await geminiResponse.text();
-    console.log("Gemini status:", geminiResponse.status);
-    console.log("Gemini response:", responseText.slice(0, 500));
+    console.log("Gemini status:", result.status);
 
-    if (!geminiResponse.ok) {
-      console.error("Gemini API error:", responseText);
-      throw new Error(`Gemini API error: ${geminiResponse.status}`);
+    if (!result.ok) {
+      console.error("Gemini error:", result.text.slice(0, 500));
+      return new Response(
+        JSON.stringify({ error: `Gemini API returned ${result.status}`, detail: result.text.slice(0, 500) }),
+        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
     }
 
-    const geminiData = JSON.parse(responseText);
+    const geminiData = JSON.parse(result.text);
     const textContent = geminiData.candidates?.[0]?.content?.parts?.[0]?.text;
 
     if (!textContent) {
-      throw new Error("No content in Gemini response");
+      return new Response(
+        JSON.stringify({ error: "Empty Gemini response" }),
+        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
     }
 
     const cleanJson = textContent.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
     const opportunities = JSON.parse(cleanJson);
-    console.log("Matching complete. Lawsuits:", opportunities.lawsuits?.length, "Trials:", opportunities.trials?.length);
+    console.log("Matched", opportunities.lawsuits?.length, "lawsuits,", opportunities.trials?.length, "trials");
 
     return new Response(JSON.stringify(opportunities), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },

@@ -4,6 +4,34 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+async function callGeminiWithRetry(geminiKey: string, body: object, maxRetries = 3): Promise<{ ok: boolean; status: number; text: string }> {
+  const geminiUrl = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
+  
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    const resp = await fetch(geminiUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": geminiKey,
+      },
+      body: JSON.stringify(body),
+    });
+
+    const text = await resp.text();
+
+    if (resp.status === 429 && attempt < maxRetries - 1) {
+      const waitMs = (attempt + 1) * 5000; // 5s, 10s, 15s
+      console.log(`Rate limited (429), waiting ${waitMs}ms before retry ${attempt + 1}/${maxRetries}...`);
+      await new Promise(r => setTimeout(r, waitMs));
+      continue;
+    }
+
+    return { ok: resp.ok, status: resp.status, text };
+  }
+
+  return { ok: false, status: 429, text: "Max retries exceeded" };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -22,7 +50,7 @@ Deno.serve(async (req) => {
       );
     }
 
-    console.log(`Analyzing ${products.length} products. API key: ${geminiKey.slice(0, 10)}...`);
+    console.log(`Analyzing ${products.length} products.`);
 
     const productList = products
       .map((p: { name: string; description: string }, i: number) =>
@@ -40,39 +68,28 @@ Return ONLY valid JSON (no markdown, no code fences):
 
 Focus on benzene, formaldehyde, talc, parabens, phthalates, PFAS, oxybenzone, aluminum.`;
 
-    const geminiUrl = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
-
-    const geminiResponse = await fetch(geminiUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-goog-api-key": geminiKey,
+    const result = await callGeminiWithRetry(geminiKey, {
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: {
+        temperature: 0.2,
+        maxOutputTokens: 4096,
       },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0.2,
-          maxOutputTokens: 4096,
-        },
-      }),
     });
 
-    const responseText = await geminiResponse.text();
-    console.log("Gemini status:", geminiResponse.status);
+    console.log("Gemini status:", result.status);
 
-    if (!geminiResponse.ok) {
-      console.error("Gemini error:", responseText.slice(0, 500));
+    if (!result.ok) {
+      console.error("Gemini error:", result.text.slice(0, 500));
       return new Response(
         JSON.stringify({ 
-          error: `Gemini API returned ${geminiResponse.status}`, 
-          gemini_error: responseText.slice(0, 500),
-          key_prefix: geminiKey.slice(0, 10)
+          error: `Gemini API returned ${result.status}`, 
+          detail: result.text.slice(0, 500)
         }),
         { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    const geminiData = JSON.parse(responseText);
+    const geminiData = JSON.parse(result.text);
     const textContent = geminiData.candidates?.[0]?.content?.parts?.[0]?.text;
 
     if (!textContent) {
