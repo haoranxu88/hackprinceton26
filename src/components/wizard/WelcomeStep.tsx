@@ -1,94 +1,102 @@
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { motion } from "framer-motion";
-import { Shield, Search, Scale } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 
-const features = [
-  {
-    icon: Search,
-    title: "Detect Hidden Chemicals",
-    description: "We scan your purchase history for products containing hazardous chemicals like benzene, formaldehyde, and PFAS.",
-  },
-  {
-    icon: Shield,
-    title: "Quantify Your Exposure",
-    description: "Using EPA models, we calculate your personalized Toxic Load Score and rank your exposure against the population.",
-  },
-  {
-    icon: Scale,
-    title: "Claim Your Redress",
-    description: "Automatically match to class action lawsuits and clinical trials. File claims with digital proof of purchase.",
-  },
+const EASE_EXPO = [0.16, 1, 0.3, 1] as const;
+
+const stats = [
+  { value: "$12.5B", label: "in active class action settlements" },
+  { value: "1,200+", label: "chemicals screened against EPA database" },
+  { value: "3 min", label: "average time to find your match" },
 ];
-
-const container = {
-  hidden: {},
-  show: { transition: { staggerChildren: 0.15 } },
-};
-
-const item = {
-  hidden: { opacity: 0, y: 30 },
-  show: { opacity: 1, y: 0, transition: { duration: 0.5, ease: "easeOut" } },
-};
 
 export function WelcomeStep({ onNext }: { onNext: () => void }) {
   return (
     <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="flex flex-col items-center justify-center min-h-[70vh] px-4"
+      initial={{ opacity: 0, y: 24 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -12 }}
+      transition={{ duration: 0.42, ease: EASE_EXPO }}
+      className="flex flex-col justify-center min-h-[calc(100vh-3rem)] px-2 max-w-3xl mx-auto"
     >
-      <motion.div
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.6 }}
-        className="text-center mb-10"
+      {/* Label */}
+      <motion.p
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 0.08, duration: 0.4 }}
+        className="text-[11px] font-semibold uppercase tracking-[0.22em] text-primary mb-8"
       >
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-semibold mb-6 tracking-wide">
-          <Shield className="w-3.5 h-3.5" />
-          HEALTH EXPOSURE INTELLIGENCE
-        </div>
-        <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tight text-foreground mb-4">
-          Your purchases tell
-          <br />
-          <span className="text-gradient-primary">a story.</span>
-        </h1>
-        <p className="text-lg text-muted-foreground max-w-xl mx-auto leading-relaxed">
-          Vigilant reads your retail history to uncover hidden chemical exposures,
-          match you to active lawsuits, and connect you with life-saving clinical trials.
+        Health Exposure Intelligence
+      </motion.p>
+
+      {/* Hero headline */}
+      <motion.h1
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.12, duration: 0.5, ease: EASE_EXPO }}
+        className="font-display font-bold leading-[0.9] tracking-tight text-foreground mb-8"
+        style={{ fontSize: "clamp(3rem, 8vw, 5.5rem)" }}
+      >
+        Your receipts
+        <br />
+        are evidence.
+      </motion.h1>
+
+      {/* Thin rule */}
+      <motion.div
+        initial={{ scaleX: 0, originX: 0 }}
+        animate={{ scaleX: 1 }}
+        transition={{ delay: 0.28, duration: 0.5, ease: EASE_EXPO }}
+        className="w-10 h-px bg-border mb-8"
+      />
+
+      {/* Description */}
+      <motion.p
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.22, duration: 0.5, ease: EASE_EXPO }}
+        className="text-lg text-muted-foreground leading-relaxed max-w-lg mb-12"
+        style={{ maxWidth: "52ch" }}
+      >
+        Vigilant scans your purchase history for products tied to class action
+        lawsuits — then tells you exactly what you may be owed.
+      </motion.p>
+
+      {/* CTA row */}
+      <motion.div
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.32, duration: 0.45, ease: EASE_EXPO }}
+        className="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-8 mb-16"
+      >
+        <Button
+          size="lg"
+          onClick={onNext}
+          className="group gap-2 font-semibold h-12 px-8 text-base"
+        >
+          Get Started
+          <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-0.5" />
+        </Button>
+        <p className="text-sm text-muted-foreground">
+          Free &middot; No account required &middot; 3 minutes
         </p>
       </motion.div>
 
+      {/* Stats row — Apple product-spec style */}
       <motion.div
-        variants={container}
-        initial="hidden"
-        animate="show"
-        className="grid grid-cols-1 sm:grid-cols-3 gap-5 max-w-3xl w-full mb-10"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 0.44, duration: 0.5 }}
+        className="flex flex-col sm:flex-row gap-6 sm:gap-12 pt-8 border-t border-border"
       >
-        {features.map((feature) => (
-          <motion.div key={feature.title} variants={item}>
-            <Card className="group h-full hover:shadow-card-hover transition-all duration-300 border-border/50 bg-card/80 backdrop-blur-sm">
-              <CardContent className="p-5 flex flex-col items-center text-center gap-3">
-                <div className="w-11 h-11 rounded-xl bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition-colors">
-                  <feature.icon className="w-5 h-5 text-primary" />
-                </div>
-                <h3 className="font-semibold text-foreground text-sm">{feature.title}</h3>
-                <p className="text-xs text-muted-foreground leading-relaxed">{feature.description}</p>
-              </CardContent>
-            </Card>
-          </motion.div>
+        {stats.map(({ value, label }) => (
+          <div key={value}>
+            <p className="font-display font-bold text-foreground text-2xl leading-none mb-1.5">
+              {value}
+            </p>
+            <p className="text-xs text-muted-foreground leading-snug">{label}</p>
+          </div>
         ))}
-      </motion.div>
-
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.6, duration: 0.5 }}
-      >
-        <Button variant="hero" size="xl" onClick={onNext}>
-          Get Started
-        </Button>
       </motion.div>
     </motion.div>
   );
