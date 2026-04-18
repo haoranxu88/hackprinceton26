@@ -1,0 +1,177 @@
+export interface Product {
+  external_id: string;
+  name: string;
+  description: string;
+  image_url: string;
+  quantity: number;
+  price: { total: string; unit_price: string };
+}
+
+export interface Transaction {
+  id: string;
+  datetime: string;
+  merchant: string;
+  order_status: string;
+  products: Product[];
+  total: string;
+}
+
+export const mockTransactions: Transaction[] = [
+  {
+    id: "txn-001",
+    datetime: "2025-11-15T00:00:00Z",
+    merchant: "Amazon",
+    order_status: "COMPLETED",
+    total: "34.97",
+    products: [
+      {
+        external_id: "amz-001",
+        name: "TRESemme Dry Shampoo Fresh & Clean 4.3 oz",
+        description: "Dry shampoo spray for freshening hair between washes. Contains propellant blend for fine mist application.",
+        image_url: "https://images.unsplash.com/photo-1585232004423-244e0e6904e3?w=100&h=100&fit=crop",
+        quantity: 2,
+        price: { total: "17.98", unit_price: "8.99" },
+      },
+      {
+        external_id: "amz-002",
+        name: "Neutrogena Beach Defense Sunscreen Spray SPF 70",
+        description: "Water-resistant broad spectrum sunscreen spray with Helioplex technology.",
+        image_url: "https://images.unsplash.com/photo-1556228578-8c89e6adf883?w=100&h=100&fit=crop",
+        quantity: 1,
+        price: { total: "12.99", unit_price: "12.99" },
+      },
+    ],
+  },
+  {
+    id: "txn-002",
+    datetime: "2025-10-22T00:00:00Z",
+    merchant: "Walmart",
+    order_status: "COMPLETED",
+    total: "45.86",
+    products: [
+      {
+        external_id: "wmt-001",
+        name: "Dove Body Wash Deep Moisture 22 oz",
+        description: "Nourishing body wash with NutriumMoisture technology for softer, smoother skin.",
+        image_url: "https://images.unsplash.com/photo-1556228453-efd6c1ff04f6?w=100&h=100&fit=crop",
+        quantity: 1,
+        price: { total: "7.97", unit_price: "7.97" },
+      },
+      {
+        external_id: "wmt-002",
+        name: "OGX Biotin & Collagen Shampoo 13 oz",
+        description: "Volumizing shampoo infused with vitamin B7 biotin and hydrolyzed wheat protein.",
+        image_url: "https://images.unsplash.com/photo-1585232004423-244e0e6904e3?w=100&h=100&fit=crop",
+        quantity: 1,
+        price: { total: "8.47", unit_price: "8.47" },
+      },
+      {
+        external_id: "wmt-003",
+        name: "Suave Antiperspirant Deodorant Powder 2.6 oz",
+        description: "24-hour wetness protection antiperspirant with powder fresh scent.",
+        image_url: "https://images.unsplash.com/photo-1556228578-8c89e6adf883?w=100&h=100&fit=crop",
+        quantity: 2,
+        price: { total: "7.94", unit_price: "3.97" },
+      },
+      {
+        external_id: "wmt-004",
+        name: "Herbal Essences Bio:Renew Argan Oil Conditioner 13.5 oz",
+        description: "Sulfate-free conditioner with real botanicals and argan oil of Morocco.",
+        image_url: "https://images.unsplash.com/photo-1585232004423-244e0e6904e3?w=100&h=100&fit=crop",
+        quantity: 1,
+        price: { total: "6.48", unit_price: "6.48" },
+      },
+    ],
+  },
+  {
+    id: "txn-003",
+    datetime: "2025-09-08T00:00:00Z",
+    merchant: "Amazon",
+    order_status: "COMPLETED",
+    total: "52.94",
+    products: [
+      {
+        external_id: "amz-003",
+        name: "Pantene Pro-V Daily Moisture Renewal Shampoo 25.4 oz",
+        description: "Pro-V shampoo with micro-moisturizers for dry, damaged hair.",
+        image_url: "https://images.unsplash.com/photo-1585232004423-244e0e6904e3?w=100&h=100&fit=crop",
+        quantity: 1,
+        price: { total: "12.99", unit_price: "12.99" },
+      },
+      {
+        external_id: "amz-004",
+        name: "Banana Boat Sport Ultra SPF 50 Sunscreen Lotion 8 oz",
+        description: "High-performance sunscreen for active lifestyles with broad spectrum UVA/UVB protection.",
+        image_url: "https://images.unsplash.com/photo-1556228578-8c89e6adf883?w=100&h=100&fit=crop",
+        quantity: 2,
+        price: { total: "19.98", unit_price: "9.99" },
+      },
+      {
+        external_id: "amz-005",
+        name: "Johnson's Baby Powder Original 22 oz",
+        description: "Classic baby powder for moisture absorption and silky-smooth feel.",
+        image_url: "https://images.unsplash.com/photo-1556228578-8c89e6adf883?w=100&h=100&fit=crop",
+        quantity: 1,
+        price: { total: "8.99", unit_price: "8.99" },
+      },
+    ],
+  },
+  {
+    id: "txn-004",
+    datetime: "2025-08-14T00:00:00Z",
+    merchant: "CVS",
+    order_status: "COMPLETED",
+    total: "28.47",
+    products: [
+      {
+        external_id: "cvs-001",
+        name: "Secret Invisible Solid Antiperspirant Powder Fresh 2.6 oz",
+        description: "Invisible solid antiperspirant that goes on clear with 48-hour sweat and odor protection.",
+        image_url: "https://images.unsplash.com/photo-1556228578-8c89e6adf883?w=100&h=100&fit=crop",
+        quantity: 1,
+        price: { total: "6.49", unit_price: "6.49" },
+      },
+      {
+        external_id: "cvs-002",
+        name: "Garnier Fructis Style Full Control Hairspray 8.25 oz",
+        description: "Anti-humidity smoothing hairspray for 24-hour hold and ultra-strong control.",
+        image_url: "https://images.unsplash.com/photo-1585232004423-244e0e6904e3?w=100&h=100&fit=crop",
+        quantity: 1,
+        price: { total: "4.99", unit_price: "4.99" },
+      },
+      {
+        external_id: "cvs-003",
+        name: "CeraVe Moisturizing Cream 16 oz",
+        description: "Rich moisturizing cream with essential ceramides and hyaluronic acid for dry skin.",
+        image_url: "https://images.unsplash.com/photo-1556228578-8c89e6adf883?w=100&h=100&fit=crop",
+        quantity: 1,
+        price: { total: "16.99", unit_price: "16.99" },
+      },
+    ],
+  },
+  {
+    id: "txn-005",
+    datetime: "2025-07-03T00:00:00Z",
+    merchant: "Walmart",
+    order_status: "COMPLETED",
+    total: "31.44",
+    products: [
+      {
+        external_id: "wmt-005",
+        name: "Batiste Dry Shampoo Original Clean & Classic 6.73 oz",
+        description: "Instant hair refresh between washes with a classic clean scent. Quick-drying formula.",
+        image_url: "https://images.unsplash.com/photo-1585232004423-244e0e6904e3?w=100&h=100&fit=crop",
+        quantity: 3,
+        price: { total: "23.97", unit_price: "7.99" },
+      },
+      {
+        external_id: "wmt-006",
+        name: "Aquaphor Healing Ointment 14 oz",
+        description: "Multi-purpose healing ointment that protects and soothes extremely dry skin.",
+        image_url: "https://images.unsplash.com/photo-1556228578-8c89e6adf883?w=100&h=100&fit=crop",
+        quantity: 1,
+        price: { total: "7.47", unit_price: "7.47" },
+      },
+    ],
+  },
+];
