@@ -4,8 +4,9 @@ import { motion } from "framer-motion";
 import { useMockToggle } from "@/hooks/useMockToggle";
 import { listKnotMerchants, linkKnotAccount, syncKnotTransactions } from "@/lib/api";
 import { mockTransactions, type Transaction } from "@/data/mock-transactions";
-import { ShoppingBag, Store, Pill, Loader2, CheckCircle2 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { ShoppingBag, Store, Pill, Loader2, CheckCircle2, ArrowLeft } from "lucide-react";
+
+const EASE_EXPO = [0.16, 1, 0.3, 1] as const;
 
 interface KnotMerchant {
   id: number;
@@ -31,11 +32,6 @@ interface LinkAccountsStepProps {
   onBack: () => void;
 }
 
-const item = {
-  hidden: { opacity: 0, y: 16 },
-  show: { opacity: 1, y: 0, transition: { duration: 0.45 } },
-};
-
 export function LinkAccountsStep({ onNext, onBack }: LinkAccountsStepProps) {
   const { isMock } = useMockToggle();
   const [loading, setLoading] = useState(false);
@@ -57,8 +53,6 @@ export function LinkAccountsStep({ onNext, onBack }: LinkAccountsStepProps) {
       .catch(() => {})
       .finally(() => setLoadingMerchants(false));
   }, [isMock]);
-
-  const handleUseDemoData = () => onNext(mockTransactions);
 
   const handleLinkMerchant = async (merchantId: number) => {
     if (isMock) {
@@ -112,113 +106,123 @@ export function LinkAccountsStep({ onNext, onBack }: LinkAccountsStepProps) {
 
   return (
     <motion.div
-      initial="hidden"
-      animate="show"
-      transition={{ staggerChildren: 0.08 }}
-      className="max-w-xl mx-auto px-6 pt-12 pb-12"
+      initial={{ opacity: 0, y: 24 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -12 }}
+      transition={{ duration: 0.42, ease: EASE_EXPO }}
+      className="flex flex-col justify-center min-h-[calc(100vh-8rem)] max-w-lg mx-auto px-2"
     >
-      <motion.div variants={item} className="mb-2">
-        <span className="text-eyebrow">Step 01</span>
-      </motion.div>
+      {/* Header */}
+      <p className="text-eyebrow mb-6">Step 1</p>
+      <h2
+        className="font-display font-bold leading-[0.92] tracking-tight text-foreground mb-4"
+        style={{ fontSize: "clamp(2.2rem, 5vw, 3.5rem)" }}
+      >
+        Connect your
+        <br />
+        accounts.
+      </h2>
+      <p className="text-base text-muted-foreground mb-10" style={{ maxWidth: "46ch" }}>
+        Link a retailer to scan your actual purchase history. Powered by KnotAPI TransactionLink — we read transaction data only.
+      </p>
 
-      <motion.h2 variants={item} className="font-display text-3xl sm:text-4xl font-bold text-foreground tracking-tight mb-3">
-        Link your accounts
-      </motion.h2>
-
-      <motion.p variants={item} className="text-sm text-muted-foreground leading-relaxed mb-10 max-w-md">
-        Connect your retail accounts so we can scan your purchase history for hazardous products. Powered by KnotAPI TransactionLink.
-      </motion.p>
-
-      {/* Merchant list */}
-      <motion.div variants={item} className="mb-8">
+      {/* Merchant rows */}
+      <div className="mb-8">
         {loadingMerchants ? (
           <div className="flex items-center gap-2 py-8 text-muted-foreground">
             <Loader2 className="w-4 h-4 animate-spin" />
             <span className="text-sm">Loading merchants...</span>
           </div>
         ) : (
-          <div className="divide-y divide-border/50">
-            {merchants.map((merchant) => {
-              const isLinked = linkedMerchants.includes(merchant.id);
-              const Icon = getIcon(merchant);
-              return (
-                <div
-                  key={merchant.id}
-                  className="flex items-center justify-between py-4 gap-4"
-                >
-                  <div className="flex items-center gap-3 min-w-0">
+          merchants.map((merchant, i) => {
+            const isLinked = linkedMerchants.includes(merchant.id);
+            const isLoadingThis = loading;
+            const Icon = getIcon(merchant);
+
+            return (
+              <motion.div
+                key={merchant.id}
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.1 + i * 0.06, duration: 0.38, ease: EASE_EXPO }}
+                className="flex items-center justify-between py-4 border-b border-border last:border-b-0"
+              >
+                <div className="flex items-center gap-4">
+                  <div className="w-9 h-9 rounded-lg bg-secondary flex items-center justify-center shrink-0">
                     {merchant.logo ? (
-                      <img
-                        src={merchant.logo}
-                        alt={merchant.name}
-                        className="w-8 h-8 rounded object-contain bg-muted p-1 shrink-0"
-                      />
+                      <img src={merchant.logo} alt={merchant.name} className="w-5 h-5 object-contain" />
                     ) : (
-                      <div className="w-8 h-8 rounded bg-secondary flex items-center justify-center shrink-0">
-                        <Icon className="w-4 h-4 text-muted-foreground" />
-                      </div>
+                      <Icon className="w-4 h-4 text-foreground" />
                     )}
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-foreground">{merchant.name}</p>
-                      <p className="text-xs text-muted-foreground">{merchant.category || "Transaction history"}</p>
-                    </div>
                   </div>
-
-                  {isLinked ? (
-                    <div className="flex items-center gap-1.5 text-xs font-medium shrink-0" style={{ color: "hsl(142, 65%, 38%)" }}>
-                      <CheckCircle2 className="w-3.5 h-3.5" />
-                      Connected
-                    </div>
-                  ) : (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleLinkMerchant(merchant.id)}
-                      disabled={loading}
-                      className="shrink-0 text-xs"
-                    >
-                      {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : "Connect"}
-                    </Button>
-                  )}
+                  <div>
+                    <p className="font-semibold text-foreground text-sm">{merchant.name}</p>
+                    <p className="text-xs text-muted-foreground">{merchant.category || "Transaction history"}</p>
+                  </div>
                 </div>
-              );
-            })}
-          </div>
-        )}
-      </motion.div>
 
+                {isLinked ? (
+                  <span className="flex items-center gap-1.5 text-xs font-semibold text-primary">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    Connected
+                  </span>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleLinkMerchant(merchant.id)}
+                    disabled={loading}
+                    className="text-xs h-8"
+                  >
+                    {isLoadingThis ? (
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                    ) : (
+                      "Connect"
+                    )}
+                  </Button>
+                )}
+              </motion.div>
+            );
+          })
+        )}
+      </div>
+
+      {/* Status message */}
       {status && (
-        <motion.p
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          className="text-xs text-muted-foreground mb-6 flex items-center gap-2"
-        >
+        <p className="text-xs text-muted-foreground mb-4 flex items-center gap-2">
           {loading && <Loader2 className="w-3 h-3 animate-spin" />}
           {status}
-        </motion.p>
+        </p>
       )}
 
       {/* Demo shortcut */}
-      <motion.div variants={item} className="surface p-5 mb-8">
-        <p className="text-xs font-semibold text-foreground mb-0.5">Quick demo</p>
-        <p className="text-xs text-muted-foreground mb-4">
-          Skip account linking and use pre-loaded data with known hazardous products — 14 items across 5 orders.
-        </p>
-        <Button variant="hero" size="sm" onClick={handleUseDemoData} className="w-full font-body">
+      <p className="text-sm text-muted-foreground mb-10">
+        No account to link?{" "}
+        <button
+          onClick={() => onNext(mockTransactions)}
+          className="text-primary font-medium underline underline-offset-2 hover:no-underline"
+        >
           Use demo data
-        </Button>
-      </motion.div>
+        </button>{" "}
+        — 14 pre-loaded products with known hazardous chemicals.
+      </p>
 
-      <motion.div variants={item} className="flex gap-3">
-        <Button variant="ghost" onClick={onBack} className="flex-1 font-body">
+      {/* Navigation */}
+      <div className="flex items-center gap-4">
+        <Button
+          variant="ghost"
+          onClick={onBack}
+          className="gap-1.5 text-sm px-0 hover:bg-transparent text-muted-foreground hover:text-foreground"
+        >
+          <ArrowLeft className="w-3.5 h-3.5" />
           Back
         </Button>
         {linkedMerchants.length > 0 && (
-          <Button variant="default" onClick={handleProceed} className={cn("flex-1 font-body")}>
+          <Button onClick={handleProceed} className="gap-2 font-semibold">
             Continue with {linkedMerchants.length} account{linkedMerchants.length > 1 ? "s" : ""}
           </Button>
         )}
-      </motion.div>
+      </div>
     </motion.div>
   );
 }

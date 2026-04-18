@@ -7,15 +7,22 @@ import type { Lawsuit } from "@/data/mock-lawsuits";
 import type { ClinicalTrial } from "@/data/mock-trials";
 import { RotateCcw } from "lucide-react";
 
+const EASE_EXPO = [0.16, 1, 0.3, 1] as const;
+
 interface TakeActionStepProps {
   lawsuits: Lawsuit[];
   trials: ClinicalTrial[];
   onRestart: () => void;
 }
 
-const item = {
-  hidden: { opacity: 0, y: 20 },
-  show: { opacity: 1, y: 0, transition: { duration: 0.5 } },
+const stagger = {
+  hidden: {},
+  show: { transition: { staggerChildren: 0.07 } },
+};
+
+const fadeUp = {
+  hidden: { opacity: 0, y: 16 },
+  show: { opacity: 1, y: 0, transition: { duration: 0.42, ease: EASE_EXPO } },
 };
 
 export function TakeActionStep({ lawsuits, trials, onRestart }: TakeActionStepProps) {
@@ -24,38 +31,43 @@ export function TakeActionStep({ lawsuits, trials, onRestart }: TakeActionStepPr
 
   return (
     <motion.div
+      variants={stagger}
       initial="hidden"
       animate="show"
-      transition={{ staggerChildren: 0.08 }}
-      className="max-w-3xl mx-auto px-6 pt-10 pb-12"
+      className="max-w-3xl mx-auto px-2 py-8"
     >
-      <motion.div variants={item} className="mb-2">
-        <span className="text-eyebrow">Your opportunities</span>
+      {/* Header */}
+      <motion.div variants={fadeUp} className="mb-12">
+        <p className="text-eyebrow mb-6">Your Opportunities</p>
+        <h2
+          className="font-display font-bold leading-[0.92] tracking-tight text-foreground mb-4"
+          style={{ fontSize: "clamp(2rem, 5vw, 3.5rem)" }}
+        >
+          {activeLawsuits.length} active lawsuit{activeLawsuits.length !== 1 ? "s" : ""}
+          <br />
+          matched to your history.
+        </h2>
+        <p className="text-base text-muted-foreground" style={{ maxWidth: "52ch" }}>
+          Based on your purchase records and chemical exposure profile.{" "}
+          {recruitingTrials.length > 0 && (
+            <>{recruitingTrials.length} clinical trial{recruitingTrials.length !== 1 ? "s" : ""} also matched.</>
+          )}
+        </p>
       </motion.div>
 
-      <motion.h2 variants={item} className="font-display text-3xl sm:text-4xl font-bold text-foreground tracking-tight mb-2">
-        You qualify for {activeLawsuits.length + recruitingTrials.length} opportunities
-      </motion.h2>
-
-      <motion.p variants={item} className="text-sm text-muted-foreground mb-8 max-w-lg">
-        {activeLawsuits.length} active lawsuits and {recruitingTrials.length} clinical trials matched to your exposure profile.
-      </motion.p>
-
-      <motion.div variants={item} className="rule-top mb-8" />
-
-      <motion.div variants={item}>
+      <motion.div variants={fadeUp}>
         <Tabs defaultValue="lawsuits" className="w-full">
           <TabsList className="bg-secondary border border-border/50 h-9 p-0.5 w-auto inline-flex mb-6">
-            <TabsTrigger value="lawsuits" className="text-xs h-8 px-4 font-body data-[state=active]:bg-background data-[state=active]:shadow-sm">
-              Lawsuits ({lawsuits.length})
+            <TabsTrigger value="lawsuits" className="text-xs h-8 px-4 data-[state=active]:bg-background data-[state=active]:shadow-sm">
+              Settlements ({lawsuits.length})
             </TabsTrigger>
-            <TabsTrigger value="trials" className="text-xs h-8 px-4 font-body data-[state=active]:bg-background data-[state=active]:shadow-sm">
-              Trials ({trials.length})
+            <TabsTrigger value="trials" className="text-xs h-8 px-4 data-[state=active]:bg-background data-[state=active]:shadow-sm">
+              Clinical Trials ({trials.length})
             </TabsTrigger>
           </TabsList>
 
           <TabsContent value="lawsuits">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="divide-y divide-border">
               {lawsuits.map((lawsuit) => (
                 <LawsuitCard key={lawsuit.id} lawsuit={lawsuit} />
               ))}
@@ -63,7 +75,7 @@ export function TakeActionStep({ lawsuits, trials, onRestart }: TakeActionStepPr
           </TabsContent>
 
           <TabsContent value="trials">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="divide-y divide-border">
               {trials.map((trial) => (
                 <TrialCard key={trial.id} trial={trial} />
               ))}
@@ -72,10 +84,14 @@ export function TakeActionStep({ lawsuits, trials, onRestart }: TakeActionStepPr
         </Tabs>
       </motion.div>
 
-      <motion.div variants={item} className="flex justify-start pt-6">
-        <Button variant="ghost" onClick={onRestart} className="gap-2 font-body text-muted-foreground hover:text-foreground">
+      <motion.div variants={fadeUp} className="pt-8 border-t border-border flex justify-center">
+        <Button
+          variant="ghost"
+          onClick={onRestart}
+          className="gap-2 text-sm text-muted-foreground hover:text-foreground"
+        >
           <RotateCcw className="w-3.5 h-3.5" />
-          Start over
+          Start over with different accounts
         </Button>
       </motion.div>
     </motion.div>

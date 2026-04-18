@@ -12,9 +12,9 @@ export default {
     },
     extend: {
       fontFamily: {
-        display: ['Bricolage Grotesque', 'system-ui', 'sans-serif'],
-        body: ['Chivo', 'system-ui', 'sans-serif'],
-        sans: ['Chivo', 'system-ui', 'sans-serif'],
+        display: ['"Big Shoulders Display"', 'system-ui', 'sans-serif'],
+        body: ['Mulish', 'system-ui', 'sans-serif'],
+        sans: ['Mulish', 'system-ui', 'sans-serif'],
       },
       colors: {
         border: "hsl(var(--border))",

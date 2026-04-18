@@ -11,6 +11,8 @@ import type { Lawsuit } from "@/data/mock-lawsuits";
 import type { ClinicalTrial } from "@/data/mock-trials";
 import { Cpu } from "lucide-react";
 
+const EASE_EXPO = [0.16, 1, 0.3, 1] as const;
+
 interface AnalysisStepProps {
   transactions: Transaction[];
   onComplete: (analysis: ExposureAnalysis, lawsuits: Lawsuit[], trials: ClinicalTrial[]) => void;
@@ -23,9 +25,16 @@ const STAGES = [
   { label: "Matching legal & clinical opportunities", duration: 800 },
 ];
 
-const DISCOVERED_CHEMICALS = [
-  "Benzene", "Formaldehyde", "Talc (Asbestos)", "Parabens",
-  "Aluminum Compounds", "Oxybenzone (BP-3)",
+const DISCOVERED_CHEMICALS: Array<{
+  name: string;
+  variant: "safe" | "moderate" | "high" | "critical";
+}> = [
+  { name: "Benzene", variant: "critical" },
+  { name: "Formaldehyde", variant: "high" },
+  { name: "Talc (Asbestos)", variant: "high" },
+  { name: "Parabens", variant: "moderate" },
+  { name: "Aluminum Compounds", variant: "moderate" },
+  { name: "Oxybenzone (BP-3)", variant: "moderate" },
 ];
 
 export function AnalysisStep({ transactions, onComplete }: AnalysisStepProps) {
@@ -35,6 +44,7 @@ export function AnalysisStep({ transactions, onComplete }: AnalysisStepProps) {
   const [discoveredIdx, setDiscoveredIdx] = useState(0);
   const [aiProvider, setAiProvider] = useState<string>("");
   const completedRef = useRef(false);
+  const totalProducts = transactions.reduce((s, t) => s + (t.products?.length || 0), 0);
 
   useEffect(() => {
     if (completedRef.current) return;
@@ -104,100 +114,70 @@ export function AnalysisStep({ transactions, onComplete }: AnalysisStepProps) {
 
   useEffect(() => {
     if (discoveredIdx >= DISCOVERED_CHEMICALS.length) return;
-    const timer = setTimeout(() => setDiscoveredIdx((prev) => prev + 1), 700);
+    const timer = setTimeout(() => setDiscoveredIdx((p) => p + 1), 750);
     return () => clearTimeout(timer);
   }, [discoveredIdx]);
-
-  const totalProducts = transactions.reduce((sum, t) => sum + (t.products?.length || 0), 0);
-  const progressPct = Math.round(progress);
 
   return (
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="max-w-xl mx-auto px-6 pt-16 pb-12 flex flex-col"
+      transition={{ duration: 0.3 }}
+      className="flex flex-col items-center justify-center min-h-[calc(100vh-8rem)] px-6 text-center"
     >
-      <span className="text-eyebrow mb-3">Step 02</span>
+      {/* Large percentage counter */}
+      <motion.div
+        initial={{ opacity: 0, scale: 0.9 }}
+        animate={{ opacity: 1, scale: 1 }}
+        transition={{ duration: 0.5, ease: EASE_EXPO }}
+        className="font-display font-bold text-primary font-tabular leading-none mb-2"
+        style={{ fontSize: "clamp(5rem, 20vw, 12rem)" }}
+      >
+        {Math.round(progress)}
+        <span className="text-[0.35em] text-muted-foreground">%</span>
+      </motion.div>
 
-      <h2 className="font-display text-3xl sm:text-4xl font-bold text-foreground tracking-tight mb-2">
-        Analyzing your products
-      </h2>
+      {/* Thin progress bar */}
+      <div className="w-full max-w-xs h-px bg-border mb-8 relative overflow-hidden rounded-full">
+        <motion.div
+          className="absolute inset-y-0 left-0 bg-primary rounded-full"
+          initial={{ width: "0%" }}
+          animate={{ width: `${progress}%` }}
+          transition={{ duration: 0.3, ease: "easeOut" }}
+        />
+      </div>
 
-      <p className="text-sm text-muted-foreground mb-10">
-        {STAGES[Math.min(stage, STAGES.length - 1)].label}…
+      {/* Stage label */}
+      <AnimatePresence mode="wait">
+        <motion.p
+          key={stage}
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -8 }}
+          transition={{ duration: 0.25 }}
+          className="text-sm font-medium text-foreground mb-2"
+        >
+          {STAGES[Math.min(stage, STAGES.length - 1)].label}
+        </motion.p>
+      </AnimatePresence>
+
+      <p className="text-xs text-muted-foreground mb-12">
+        {totalProducts} products across {transactions.length} orders
       </p>
 
-      {/* Progress track */}
-      <div className="mb-10">
-        <div className="h-px w-full bg-border relative overflow-hidden">
-          <motion.div
-            className="absolute inset-y-0 left-0 bg-foreground"
-            initial={{ width: "0%" }}
-            animate={{ width: `${progressPct}%` }}
-            transition={{ duration: 0.3 }}
-          />
-        </div>
-        <div className="flex justify-between mt-2">
-          <span className="text-xs text-muted-foreground font-body">{progressPct}% complete</span>
-          <span className="text-xs text-muted-foreground font-body">
-            {totalProducts} products · {transactions.length} orders
-          </span>
-        </div>
-      </div>
-
-      {/* Stage list */}
-      <div className="space-y-3 mb-10">
-        {STAGES.map((s, i) => (
-          <div key={s.label} className="flex items-center gap-3">
-            <div
-              className="w-1.5 h-1.5 rounded-full shrink-0"
-              style={{
-                background: i < stage
-                  ? "hsl(142, 65%, 38%)"
-                  : i === stage
-                  ? "hsl(38, 90%, 50%)"
-                  : "hsl(var(--border))",
-              }}
-            />
-            <span
-              className="text-xs font-body"
-              style={{
-                color: i < stage
-                  ? "hsl(142, 65%, 38%)"
-                  : i === stage
-                  ? "hsl(var(--foreground))"
-                  : "hsl(var(--muted-foreground))",
-                opacity: i > stage ? 0.4 : 1,
-              }}
-            >
-              {s.label}
-            </span>
-          </div>
-        ))}
-      </div>
-
-      {/* Chemical discovery */}
-      <div className="flex flex-wrap gap-2">
+      {/* Discovered chemicals */}
+      <div className="flex flex-wrap justify-center gap-2 max-w-sm">
         <AnimatePresence>
-          {DISCOVERED_CHEMICALS.slice(0, discoveredIdx).map((chem) => (
+          {DISCOVERED_CHEMICALS.slice(0, discoveredIdx).map(({ name, variant }) => (
             <motion.div
-              key={chem}
-              initial={{ opacity: 0, scale: 0.8 }}
+              key={name}
+              initial={{ opacity: 0, scale: 0.7 }}
               animate={{ opacity: 1, scale: 1 }}
-              transition={{ type: "spring", stiffness: 300, damping: 22 }}
+              transition={{ duration: 0.3, ease: EASE_EXPO }}
             >
-              <Badge
-                variant={
-                  chem === "Benzene" || chem.includes("Talc")
-                    ? "critical"
-                    : chem === "Formaldehyde"
-                    ? "high"
-                    : "moderate"
-                }
-                className="text-xs font-body"
-              >
-                {chem}
+              <Badge variant={variant} className="text-xs">
+                {name}
               </Badge>
             </motion.div>
           ))}
@@ -205,7 +185,7 @@ export function AnalysisStep({ transactions, onComplete }: AnalysisStepProps) {
       </div>
 
       {aiProvider && (
-        <div className="mt-8 flex items-center gap-1.5 text-xs text-muted-foreground/60 font-body">
+        <div className="mt-8 flex items-center gap-1.5 text-xs text-muted-foreground/60">
           <Cpu className="w-3 h-3" />
           <span>
             Powered by{" "}

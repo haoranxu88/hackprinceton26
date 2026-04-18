@@ -1,13 +1,15 @@
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { ToxicLoadGauge } from "@/components/exposure/ToxicLoadGauge";
 import { ChemicalBreakdown } from "@/components/exposure/ChemicalBreakdown";
 import { ProductTimeline } from "@/components/exposure/ProductTimeline";
 import { RiskCategories } from "@/components/exposure/RiskCategories";
 import type { ExposureAnalysis } from "@/data/mock-analysis";
 import type { Transaction } from "@/data/mock-transactions";
-import { getRiskColor } from "@/lib/exposure-calculator";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, ArrowLeft } from "lucide-react";
+
+const EASE_EXPO = [0.16, 1, 0.3, 1] as const;
 
 interface ExposureDashboardProps {
   analysis: ExposureAnalysis;
@@ -16,128 +18,137 @@ interface ExposureDashboardProps {
   onBack: () => void;
 }
 
-const item = {
-  hidden: { opacity: 0, y: 20 },
-  show: { opacity: 1, y: 0, transition: { duration: 0.5 } },
+const stagger = {
+  hidden: {},
+  show: { transition: { staggerChildren: 0.08 } },
 };
 
-const riskLabels: Record<string, string> = {
-  safe: "Low Risk",
-  moderate: "Moderate Risk",
-  high: "High Risk",
-  critical: "Critical Risk",
+const fadeUp = {
+  hidden: { opacity: 0, y: 20 },
+  show: { opacity: 1, y: 0, transition: { duration: 0.45, ease: EASE_EXPO } },
 };
 
 export function ExposureDashboard({ analysis, transactions, onNext, onBack }: ExposureDashboardProps) {
-  const riskColor = getRiskColor(analysis.riskLevel);
-
   return (
     <motion.div
+      variants={stagger}
       initial="hidden"
       animate="show"
-      transition={{ staggerChildren: 0.08 }}
-      className="max-w-3xl mx-auto px-6 pt-10 pb-12"
+      exit={{ opacity: 0, y: -12 }}
+      className="max-w-4xl mx-auto px-2 py-8"
     >
-      <motion.div variants={item} className="mb-2">
-        <span className="text-eyebrow">Exposure Report</span>
-      </motion.div>
+      {/* Hero section */}
+      <motion.div variants={fadeUp} className="mb-12">
+        <p className="text-eyebrow mb-6">Exposure Report</p>
 
-      {/* Hero score section */}
-      <motion.div variants={item} className="mb-10 pt-4">
-        <div className="flex flex-col sm:flex-row sm:items-end gap-4 sm:gap-8">
+        <h2
+          className="font-display font-bold leading-[0.92] tracking-tight text-foreground mb-6"
+          style={{ fontSize: "clamp(2rem, 5vw, 3.75rem)" }}
+        >
+          {analysis.flaggedProducts} of your {analysis.totalProductsScanned} scanned
+          <br />
+          products contain hazardous chemicals.
+        </h2>
+
+        <p className="text-lg text-muted-foreground leading-relaxed mb-8" style={{ maxWidth: "58ch" }}>
+          {analysis.chemicals.length} substances identified — including carcinogens and
+          endocrine disruptors. Your exposure places you in the{" "}
+          <span className="font-semibold text-foreground">{analysis.percentile}th percentile</span> of
+          users screened. You may have grounds for legal recourse.
+        </p>
+
+        {/* Four-stat row */}
+        <div className="flex flex-wrap gap-8 pt-8 border-t border-border">
           <div>
-            <div
-              className="font-display font-bold leading-none tracking-tight"
-              style={{ fontSize: "clamp(5rem, 18vw, 9rem)", color: riskColor }}
-            >
+            <p className="font-display font-bold text-foreground text-3xl leading-none mb-1.5">
               {analysis.overallScore}
-            </div>
-            <div className="mt-2 flex items-center gap-3">
-              <span
-                className="text-xs font-semibold font-body px-2 py-0.5 rounded-sm"
-                style={{
-                  color: riskColor,
-                  background: `color-mix(in srgb, ${riskColor} 12%, transparent)`,
-                }}
-              >
-                {riskLabels[analysis.riskLevel] ?? analysis.riskLevel}
-              </span>
-              <span className="text-xs text-muted-foreground font-body">
-                {analysis.percentile}th percentile
-              </span>
-            </div>
-          </div>
-
-          <div className="sm:ml-auto sm:text-right pb-1">
-            <p className="text-sm font-semibold text-foreground">
-              {analysis.flaggedProducts} of {analysis.totalProductsScanned} products flagged
+              <span className="text-lg text-muted-foreground font-normal">/100</span>
             </p>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              {analysis.chemicals.length} hazardous chemicals detected
-            </p>
+            <p className="text-xs text-muted-foreground">Toxic Load Score</p>
           </div>
-        </div>
-
-        {/* Score bar */}
-        <div className="mt-6 h-1.5 w-full rounded-full overflow-hidden bg-muted">
-          <motion.div
-            className="h-full rounded-full"
-            initial={{ width: 0 }}
-            animate={{ width: `${analysis.overallScore}%` }}
-            transition={{ duration: 1.2, delay: 0.3 }}
-            style={{ background: `linear-gradient(90deg, hsl(142,65%,38%), hsl(36,90%,50%), hsl(25,88%,52%), hsl(0,78%,54%))` }}
-          />
-        </div>
-        <div className="flex justify-between mt-1.5 text-[10px] text-muted-foreground font-body">
-          <span>0 — Safe</span>
-          <span>100 — Critical</span>
+          <div>
+            <p className="font-display font-bold text-foreground text-3xl leading-none mb-1.5">
+              {analysis.percentile}
+              <span className="text-lg text-muted-foreground font-normal">th</span>
+            </p>
+            <p className="text-xs text-muted-foreground">Population percentile</p>
+          </div>
+          <div>
+            <p className="font-display font-bold text-foreground text-3xl leading-none mb-1.5">
+              {analysis.chemicals.length}
+            </p>
+            <p className="text-xs text-muted-foreground">Chemicals detected</p>
+          </div>
+          <div>
+            <p className="font-display font-bold text-foreground text-3xl leading-none mb-1.5">
+              {analysis.flaggedProducts}
+            </p>
+            <p className="text-xs text-muted-foreground">Products flagged</p>
+          </div>
         </div>
       </motion.div>
-
-      <motion.div variants={item} className="rule-top mb-8" />
 
       {/* Chemical badges */}
-      <motion.div variants={item} className="mb-8">
-        <p className="text-xs font-semibold text-foreground mb-3">Detected chemicals</p>
-        <div className="flex flex-wrap gap-2">
-          {analysis.chemicals.map((c) => (
-            <Badge
-              key={c.chemical}
-              variant={c.riskLevel as "safe" | "moderate" | "high" | "critical"}
-              className="text-xs font-body"
-            >
-              {c.chemical}
-            </Badge>
-          ))}
-        </div>
+      <motion.div variants={fadeUp} className="flex flex-wrap gap-2 mb-10">
+        {analysis.chemicals.map((c) => (
+          <Badge
+            key={c.chemical}
+            variant={c.riskLevel as "safe" | "moderate" | "high" | "critical"}
+            className="text-xs"
+          >
+            {c.chemical} — {c.category.replace("_", " ")}
+          </Badge>
+        ))}
       </motion.div>
 
-      {/* Chemical concentration chart */}
-      <motion.div variants={item} className="surface p-5 mb-5">
-        <p className="text-xs font-semibold text-foreground mb-4">Chemical concentration (ppm)</p>
-        <ChemicalBreakdown chemicals={analysis.chemicals} />
-      </motion.div>
+      {/* Charts */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-10">
+        <motion.div variants={fadeUp} className="space-y-6">
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-4">
+              Toxic Load
+            </p>
+            <div className="flex justify-center">
+              <ToxicLoadGauge score={analysis.overallScore} percentile={analysis.percentile} />
+            </div>
+          </div>
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-4">
+              Exposure Routes
+            </p>
+            <RiskCategories chemicals={analysis.chemicals} />
+          </div>
+        </motion.div>
 
-      {/* Two-column: exposure routes + flagged products */}
-      <motion.div variants={item} className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-8">
-        <div className="surface p-5">
-          <p className="text-xs font-semibold text-foreground mb-4">Exposure routes</p>
-          <RiskCategories chemicals={analysis.chemicals} />
-        </div>
-        <div className="surface p-5">
-          <p className="text-xs font-semibold text-foreground mb-4">Flagged products</p>
-          <ProductTimeline transactions={transactions} chemicals={analysis.chemicals} />
-        </div>
-      </motion.div>
+        <motion.div variants={fadeUp} className="lg:col-span-2 space-y-6">
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-4">
+              Chemical Concentration Analysis
+            </p>
+            <ChemicalBreakdown chemicals={analysis.chemicals} />
+          </div>
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-4">
+              Flagged Products Timeline
+            </p>
+            <ProductTimeline transactions={transactions} chemicals={analysis.chemicals} />
+          </div>
+        </motion.div>
+      </div>
 
       {/* Navigation */}
-      <motion.div variants={item} className="flex gap-3">
-        <Button variant="ghost" onClick={onBack} className="font-body">
+      <motion.div variants={fadeUp} className="flex items-center gap-4 pt-4 border-t border-border">
+        <Button
+          variant="ghost"
+          onClick={onBack}
+          className="gap-1.5 text-sm px-0 hover:bg-transparent text-muted-foreground hover:text-foreground"
+        >
+          <ArrowLeft className="w-3.5 h-3.5" />
           Back
         </Button>
-        <Button variant="hero" size="lg" onClick={onNext} className="ml-auto gap-2 font-body">
-          See your opportunities
-          <ArrowRight className="w-4 h-4" />
+        <Button size="lg" onClick={onNext} className="group gap-2 font-semibold ml-auto">
+          See What You're Owed
+          <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-0.5" />
         </Button>
       </motion.div>
     </motion.div>

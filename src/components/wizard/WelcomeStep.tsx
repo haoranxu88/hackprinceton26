@@ -1,89 +1,96 @@
 import { Button } from "@/components/ui/button";
 import { motion } from "framer-motion";
+import { ArrowRight } from "lucide-react";
 
-const features = [
-  {
-    num: "01",
-    title: "Detect Hidden Chemicals",
-    description:
-      "We scan your purchase history for products containing hazardous chemicals like benzene, formaldehyde, and PFAS.",
-  },
-  {
-    num: "02",
-    title: "Quantify Your Exposure",
-    description:
-      "Using EPA dermal absorption models, we calculate your personalized Toxic Load Score and rank your exposure against the population.",
-  },
-  {
-    num: "03",
-    title: "Claim Your Redress",
-    description:
-      "Automatically match to active class action lawsuits and clinical trials. File claims with digital proof of purchase.",
-  },
+const EASE_EXPO = [0.16, 1, 0.3, 1] as const;
+
+const stats = [
+  { value: "$12.5B", label: "in active class action settlements" },
+  { value: "1,200+", label: "chemicals screened against EPA database" },
+  { value: "3 min", label: "average time to find your match" },
 ];
-
-const item = {
-  hidden: { opacity: 0, y: 20 },
-  show: { opacity: 1, y: 0, transition: { duration: 0.5 } },
-};
 
 export function WelcomeStep({ onNext }: { onNext: () => void }) {
   return (
     <motion.div
-      initial="hidden"
-      animate="show"
-      transition={{ staggerChildren: 0.1 }}
-      className="max-w-2xl mx-auto px-6 pt-16 pb-12"
+      initial={{ opacity: 0, y: 24 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -12 }}
+      transition={{ duration: 0.42, ease: EASE_EXPO }}
+      className="flex flex-col justify-center min-h-[calc(100vh-3rem)] px-2 max-w-3xl mx-auto"
     >
-      <motion.div variants={item} className="mb-3">
-        <span className="text-eyebrow">Health Exposure Intelligence</span>
-      </motion.div>
-
-      <motion.h1
-        variants={item}
-        className="font-display text-5xl sm:text-6xl lg:text-7xl font-bold tracking-tight text-foreground leading-[1.05] mb-6"
-      >
-        Your purchases
-        <br />
-        tell a story.
-      </motion.h1>
-
       <motion.p
-        variants={item}
-        className="text-base text-muted-foreground leading-relaxed max-w-lg mb-12"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 0.08, duration: 0.4 }}
+        className="text-eyebrow mb-8"
       >
-        Vigilant reads your retail history to uncover hidden chemical exposures,
-        match you to active lawsuits, and connect you with life-saving clinical
-        trials.
+        Health Exposure Intelligence
       </motion.p>
 
-      <motion.div variants={item} className="rule-top mb-10" />
+      <motion.h1
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.12, duration: 0.5, ease: EASE_EXPO }}
+        className="font-display font-bold leading-[0.9] tracking-tight text-foreground mb-8"
+        style={{ fontSize: "clamp(3rem, 8vw, 5.5rem)" }}
+      >
+        Your receipts
+        <br />
+        are evidence.
+      </motion.h1>
 
       <motion.div
-        variants={{ hidden: {}, show: { transition: { staggerChildren: 0.08 } } }}
-        className="space-y-8 mb-12"
+        initial={{ scaleX: 0, originX: 0 }}
+        animate={{ scaleX: 1 }}
+        transition={{ delay: 0.28, duration: 0.5, ease: EASE_EXPO }}
+        className="w-10 h-px bg-border mb-8"
+      />
+
+      <motion.p
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.22, duration: 0.5, ease: EASE_EXPO }}
+        className="text-lg text-muted-foreground leading-relaxed mb-12"
+        style={{ maxWidth: "52ch" }}
       >
-        {features.map((f) => (
-          <motion.div key={f.num} variants={item} className="flex gap-6">
-            <span className="font-display text-xs font-bold text-accent shrink-0 mt-1 w-5">
-              {f.num}
-            </span>
-            <div>
-              <p className="font-semibold text-foreground text-sm mb-1">{f.title}</p>
-              <p className="text-sm text-muted-foreground leading-relaxed max-w-md">
-                {f.description}
-              </p>
-            </div>
-          </motion.div>
-        ))}
+        Vigilant scans your purchase history for products tied to class action
+        lawsuits — then tells you exactly what you may be owed.
+      </motion.p>
+
+      <motion.div
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.32, duration: 0.45, ease: EASE_EXPO }}
+        className="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-8 mb-16"
+      >
+        <Button
+          size="lg"
+          onClick={onNext}
+          className="group gap-2 font-semibold h-12 px-8 text-base"
+        >
+          Get Started
+          <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-0.5" />
+        </Button>
+        <p className="text-sm text-muted-foreground">
+          Free &middot; No account required &middot; 3 minutes
+        </p>
       </motion.div>
 
-      <motion.div variants={item} className="rule-top mb-10" />
-
-      <motion.div variants={item} className="flex justify-start">
-        <Button variant="hero" size="lg" onClick={onNext} className="font-body font-medium">
-          Get started →
-        </Button>
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 0.44, duration: 0.5 }}
+        className="flex flex-col sm:flex-row gap-6 sm:gap-12 pt-8 border-t border-border"
+      >
+        {stats.map(({ value, label }) => (
+          <div key={value}>
+            <p className="font-display font-bold text-foreground text-2xl leading-none mb-1.5">
+              {value}
+            </p>
+            <p className="text-xs text-muted-foreground leading-snug">{label}</p>
+          </div>
+        ))}
       </motion.div>
     </motion.div>
   );
