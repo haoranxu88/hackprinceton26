@@ -2,6 +2,7 @@ import { MockToggleProvider } from "@/hooks/useMockToggle";
 import { MockToggle } from "@/components/layout/MockToggle";
 import { WizardContainer } from "@/components/wizard/WizardContainer";
 import { Shield } from "lucide-react";
+import "./index.css";
 
 function App() {
   return (
