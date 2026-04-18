@@ -38,9 +38,8 @@ export function WizardContainer() {
 
   return (
     <div className="w-full">
-      {/* Step indicator - show on all steps except welcome */}
       {step > 0 && (
-        <div className="py-4 mb-2">
+        <div className="border-b border-border/40 mb-2">
           <StepIndicator currentStep={step} />
         </div>
       )}

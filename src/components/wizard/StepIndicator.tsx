@@ -7,39 +7,48 @@ interface StepIndicatorProps {
 }
 
 export function StepIndicator({ currentStep }: StepIndicatorProps) {
+  const steps = STEP_LABELS.slice(1); // skip Welcome
+
   return (
-    <div className="flex items-center justify-center gap-1 sm:gap-2 px-4">
-      {STEP_LABELS.map((label, index) => {
-        const isCompleted = index < currentStep;
-        const isCurrent = index === currentStep;
+    <div className="flex items-center justify-center gap-0 px-4 py-2">
+      {steps.map((label, idx) => {
+        const stepNum = idx + 1;
+        const isCompleted = stepNum < currentStep;
+        const isCurrent = stepNum === currentStep;
 
         return (
-          <div key={label} className="flex items-center gap-1 sm:gap-2">
-            <div className="flex items-center gap-1.5">
-              <div
-                className={cn(
-                  "flex items-center justify-center w-7 h-7 rounded-full text-xs font-semibold transition-all duration-500",
-                  isCompleted && "bg-primary text-primary-foreground",
-                  isCurrent && "bg-primary text-primary-foreground shadow-glow ring-2 ring-primary/30",
-                  !isCompleted && !isCurrent && "bg-muted text-muted-foreground"
-                )}
-              >
-                {isCompleted ? <Check className="w-3.5 h-3.5" /> : index + 1}
-              </div>
+          <div key={label} className="flex items-center">
+            <div className="flex items-center gap-1.5 px-2">
               <span
                 className={cn(
-                  "text-xs font-medium hidden sm:inline transition-colors",
-                  isCurrent ? "text-foreground" : "text-muted-foreground"
+                  "text-[10px] font-semibold font-body transition-colors",
+                  isCurrent ? "text-accent" : isCompleted ? "text-muted-foreground" : "text-muted-foreground/30"
+                )}
+              >
+                {isCompleted ? (
+                  <Check className="w-3 h-3" strokeWidth={2.5} />
+                ) : (
+                  `0${stepNum}`
+                )}
+              </span>
+              <span
+                className={cn(
+                  "text-xs transition-colors hidden sm:inline",
+                  isCurrent
+                    ? "text-foreground font-semibold"
+                    : isCompleted
+                    ? "text-muted-foreground"
+                    : "text-muted-foreground/30"
                 )}
               >
                 {label}
               </span>
             </div>
-            {index < STEP_LABELS.length - 1 && (
+            {idx < steps.length - 1 && (
               <div
                 className={cn(
-                  "w-6 sm:w-10 h-0.5 rounded-full transition-all duration-500",
-                  isCompleted ? "bg-primary" : "bg-muted"
+                  "w-8 h-px shrink-0 transition-colors",
+                  stepNum < currentStep ? "bg-muted-foreground/30" : "bg-border"
                 )}
               />
             )}

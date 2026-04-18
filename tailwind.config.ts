@@ -11,6 +11,11 @@ export default {
       screens: { "2xl": "1400px" },
     },
     extend: {
+      fontFamily: {
+        display: ['Bricolage Grotesque', 'system-ui', 'sans-serif'],
+        body: ['Chivo', 'system-ui', 'sans-serif'],
+        sans: ['Chivo', 'system-ui', 'sans-serif'],
+      },
       colors: {
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",

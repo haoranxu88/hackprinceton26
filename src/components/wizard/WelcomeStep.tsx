@@ -1,93 +1,88 @@
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { motion } from "framer-motion";
-import { Shield, Search, Scale } from "lucide-react";
 
 const features = [
   {
-    icon: Search,
+    num: "01",
     title: "Detect Hidden Chemicals",
-    description: "We scan your purchase history for products containing hazardous chemicals like benzene, formaldehyde, and PFAS.",
+    description:
+      "We scan your purchase history for products containing hazardous chemicals like benzene, formaldehyde, and PFAS.",
   },
   {
-    icon: Shield,
+    num: "02",
     title: "Quantify Your Exposure",
-    description: "Using EPA models, we calculate your personalized Toxic Load Score and rank your exposure against the population.",
+    description:
+      "Using EPA dermal absorption models, we calculate your personalized Toxic Load Score and rank your exposure against the population.",
   },
   {
-    icon: Scale,
+    num: "03",
     title: "Claim Your Redress",
-    description: "Automatically match to class action lawsuits and clinical trials. File claims with digital proof of purchase.",
+    description:
+      "Automatically match to active class action lawsuits and clinical trials. File claims with digital proof of purchase.",
   },
 ];
 
-const container = {
-  hidden: {},
-  show: { transition: { staggerChildren: 0.15 } },
-};
-
 const item = {
-  hidden: { opacity: 0, y: 30 },
-  show: { opacity: 1, y: 0, transition: { duration: 0.5, ease: "easeOut" } },
+  hidden: { opacity: 0, y: 20 },
+  show: { opacity: 1, y: 0, transition: { duration: 0.5 } },
 };
 
 export function WelcomeStep({ onNext }: { onNext: () => void }) {
   return (
     <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="flex flex-col items-center justify-center min-h-[70vh] px-4"
+      initial="hidden"
+      animate="show"
+      transition={{ staggerChildren: 0.1 }}
+      className="max-w-2xl mx-auto px-6 pt-16 pb-12"
     >
-      <motion.div
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.6 }}
-        className="text-center mb-10"
-      >
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-semibold mb-6 tracking-wide">
-          <Shield className="w-3.5 h-3.5" />
-          HEALTH EXPOSURE INTELLIGENCE
-        </div>
-        <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tight text-foreground mb-4">
-          Your purchases tell
-          <br />
-          <span className="text-gradient-primary">a story.</span>
-        </h1>
-        <p className="text-lg text-muted-foreground max-w-xl mx-auto leading-relaxed">
-          Vigilant reads your retail history to uncover hidden chemical exposures,
-          match you to active lawsuits, and connect you with life-saving clinical trials.
-        </p>
+      <motion.div variants={item} className="mb-3">
+        <span className="text-eyebrow">Health Exposure Intelligence</span>
       </motion.div>
 
-      <motion.div
-        variants={container}
-        initial="hidden"
-        animate="show"
-        className="grid grid-cols-1 sm:grid-cols-3 gap-5 max-w-3xl w-full mb-10"
+      <motion.h1
+        variants={item}
+        className="font-display text-5xl sm:text-6xl lg:text-7xl font-bold tracking-tight text-foreground leading-[1.05] mb-6"
       >
-        {features.map((feature) => (
-          <motion.div key={feature.title} variants={item}>
-            <Card className="group h-full hover:shadow-card-hover transition-all duration-300 border-border/50 bg-card/80 backdrop-blur-sm">
-              <CardContent className="p-5 flex flex-col items-center text-center gap-3">
-                <div className="w-11 h-11 rounded-xl bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition-colors">
-                  <feature.icon className="w-5 h-5 text-primary" />
-                </div>
-                <h3 className="font-semibold text-foreground text-sm">{feature.title}</h3>
-                <p className="text-xs text-muted-foreground leading-relaxed">{feature.description}</p>
-              </CardContent>
-            </Card>
+        Your purchases
+        <br />
+        tell a story.
+      </motion.h1>
+
+      <motion.p
+        variants={item}
+        className="text-base text-muted-foreground leading-relaxed max-w-lg mb-12"
+      >
+        Vigilant reads your retail history to uncover hidden chemical exposures,
+        match you to active lawsuits, and connect you with life-saving clinical
+        trials.
+      </motion.p>
+
+      <motion.div variants={item} className="rule-top mb-10" />
+
+      <motion.div
+        variants={{ hidden: {}, show: { transition: { staggerChildren: 0.08 } } }}
+        className="space-y-8 mb-12"
+      >
+        {features.map((f) => (
+          <motion.div key={f.num} variants={item} className="flex gap-6">
+            <span className="font-display text-xs font-bold text-accent shrink-0 mt-1 w-5">
+              {f.num}
+            </span>
+            <div>
+              <p className="font-semibold text-foreground text-sm mb-1">{f.title}</p>
+              <p className="text-sm text-muted-foreground leading-relaxed max-w-md">
+                {f.description}
+              </p>
+            </div>
           </motion.div>
         ))}
       </motion.div>
 
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.6, duration: 0.5 }}
-      >
-        <Button variant="hero" size="xl" onClick={onNext}>
-          Get Started
+      <motion.div variants={item} className="rule-top mb-10" />
+
+      <motion.div variants={item} className="flex justify-start">
+        <Button variant="hero" size="lg" onClick={onNext} className="font-body font-medium">
+          Get started →
         </Button>
       </motion.div>
     </motion.div>
