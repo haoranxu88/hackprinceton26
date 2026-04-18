@@ -16,15 +16,6 @@ function App() {
         await supabase.auth.signInAnonymously();
       }
       setAuthReady(true);
-
-      // One-time key validation check
-      supabase.functions.invoke("debug-secrets").then(({ data, error }) => {
-        if (error) {
-          console.error("[KEY CHECK] Failed:", error);
-        } else {
-          console.log("[KEY CHECK]", JSON.stringify(data, null, 2));
-        }
-      });
     };
     initAuth();
   }, []);

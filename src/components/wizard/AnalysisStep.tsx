@@ -10,7 +10,7 @@ import { analyzeExposure, matchOpportunities } from "@/lib/api";
 import type { Transaction } from "@/data/mock-transactions";
 import type { Lawsuit } from "@/data/mock-lawsuits";
 import type { ClinicalTrial } from "@/data/mock-trials";
-import { Scan, FlaskConical, AlertTriangle, CheckCircle2 } from "lucide-react";
+import { Scan, FlaskConical, AlertTriangle, CheckCircle2, Cpu } from "lucide-react";
 
 interface AnalysisStepProps {
   transactions: Transaction[];
@@ -34,6 +34,7 @@ export function AnalysisStep({ transactions, onComplete }: AnalysisStepProps) {
   const [stage, setStage] = useState(0);
   const [progress, setProgress] = useState(0);
   const [discoveredIdx, setDiscoveredIdx] = useState(0);
+  const [aiProvider, setAiProvider] = useState<string>("");
   const completedRef = useRef(false);
 
   useEffect(() => {
@@ -84,6 +85,7 @@ export function AnalysisStep({ transactions, onComplete }: AnalysisStepProps) {
           console.log("[analysis] Calling analyze-exposure with", allProducts.length, "products");
           const analysisResult = await analyzeExposure(allProducts);
           console.log("[analysis] Result:", JSON.stringify(analysisResult).slice(0, 300));
+          if (analysisResult?._provider) setAiProvider(analysisResult._provider);
 
           // Stage 3: Calculate scores
           setStage(2);
@@ -194,6 +196,16 @@ export function AnalysisStep({ transactions, onComplete }: AnalysisStepProps) {
       <p className="text-xs text-muted-foreground mt-6">
         Scanning {totalProducts} products across {transactions.length} orders
       </p>
+
+      {aiProvider && (
+        <div className="mt-3 flex items-center gap-1.5 text-xs text-muted-foreground/70">
+          <Cpu className="w-3 h-3" />
+          <span>
+            Powered by{" "}
+            {aiProvider === "enter" ? "Enter AI" : aiProvider === "dedalus" ? "Dedalus Labs" : aiProvider === "gemini" ? "Gemini" : aiProvider}
+          </span>
+        </div>
+      )}
     </motion.div>
   );
 }

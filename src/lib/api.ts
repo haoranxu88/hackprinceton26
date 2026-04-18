@@ -39,6 +39,10 @@ async function invokeEdgeFunction(functionName: string, body: Record<string, unk
   return data;
 }
 
+export async function listKnotMerchants() {
+  return invokeEdgeFunction("knot-proxy", { action: "list-merchants" });
+}
+
 export async function linkKnotAccount(userId: string, merchantId: number) {
   return invokeEdgeFunction("knot-proxy", { action: "link-account", userId, merchantId });
 }
@@ -53,4 +57,8 @@ export async function analyzeExposure(products: { name: string; description: str
 
 export async function matchOpportunities(chemicals: string[]) {
   return invokeEdgeFunction("match-opportunities", { chemicals });
+}
+
+export async function dedalusAgent(task: "analyze" | "match", data: Record<string, unknown>) {
+  return invokeEdgeFunction("dedalus-agent", { task, data });
 }
