@@ -1,12 +1,11 @@
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { LawsuitCard } from "@/components/claims/LawsuitCard";
 import { TrialCard } from "@/components/trials/TrialCard";
 import type { Lawsuit } from "@/data/mock-lawsuits";
 import type { ClinicalTrial } from "@/data/mock-trials";
-import { RotateCcw } from "lucide-react";
-
-const EASE_EXPO = [0.16, 1, 0.3, 1] as const;
+import { Scale, Microscope, RotateCcw } from "lucide-react";
 
 interface TakeActionStepProps {
   lawsuits: Lawsuit[];
@@ -14,14 +13,9 @@ interface TakeActionStepProps {
   onRestart: () => void;
 }
 
-const stagger = {
-  hidden: {},
-  show: { transition: { staggerChildren: 0.07 } },
-};
-
-const fadeUp = {
-  hidden: { opacity: 0, y: 16 },
-  show: { opacity: 1, y: 0, transition: { duration: 0.42, ease: EASE_EXPO } },
+const item = {
+  hidden: { opacity: 0, y: 20 },
+  show: { opacity: 1, y: 0, transition: { duration: 0.5 } },
 };
 
 export function TakeActionStep({ lawsuits, trials, onRestart }: TakeActionStepProps) {
@@ -30,69 +24,55 @@ export function TakeActionStep({ lawsuits, trials, onRestart }: TakeActionStepPr
 
   return (
     <motion.div
-      variants={stagger}
       initial="hidden"
       animate="show"
-      className="max-w-3xl mx-auto px-2 py-8"
+      transition={{ staggerChildren: 0.1 }}
+      className="max-w-4xl mx-auto px-4 py-4 space-y-6"
     >
-      {/* Header */}
-      <motion.div variants={fadeUp} className="mb-12">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-primary mb-6">
+      <motion.div variants={item} className="text-center">
+        <h2 className="text-2xl sm:text-3xl font-bold text-foreground mb-1">
           Your Opportunities
-        </p>
-        <h2
-          className="font-display font-bold leading-[0.92] tracking-tight text-foreground mb-4"
-          style={{ fontSize: "clamp(2rem, 5vw, 3.5rem)" }}
-        >
-          {activeLawsuits.length} active lawsuit{activeLawsuits.length !== 1 ? "s" : ""}
-          <br />
-          matched to your history.
         </h2>
-        <p className="text-base text-muted-foreground" style={{ maxWidth: "52ch" }}>
-          Based on your purchase records and chemical exposure profile.{" "}
-          {recruitingTrials.length > 0 && (
-            <>{recruitingTrials.length} clinical trial{recruitingTrials.length !== 1 ? "s" : ""} also matched.</>
-          )}
+        <p className="text-muted-foreground text-sm">
+          {activeLawsuits.length} active lawsuits and {recruitingTrials.length} clinical trials matched to your exposure profile
         </p>
       </motion.div>
 
-      {/* Settlements section */}
-      {lawsuits.length > 0 && (
-        <motion.div variants={fadeUp} className="mb-12">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground mb-1">
-            Settlements
-          </p>
-          <div className="divide-y divide-border">
-            {lawsuits.map((lawsuit) => (
-              <LawsuitCard key={lawsuit.id} lawsuit={lawsuit} />
-            ))}
-          </div>
-        </motion.div>
-      )}
+      <motion.div variants={item}>
+        <Tabs defaultValue="lawsuits" className="w-full">
+          <TabsList className="grid w-full grid-cols-2 max-w-sm mx-auto">
+            <TabsTrigger value="lawsuits" className="gap-1.5 text-sm">
+              <Scale className="w-4 h-4" />
+              Lawsuits ({lawsuits.length})
+            </TabsTrigger>
+            <TabsTrigger value="trials" className="gap-1.5 text-sm">
+              <Microscope className="w-4 h-4" />
+              Trials ({trials.length})
+            </TabsTrigger>
+          </TabsList>
 
-      {/* Clinical Trials section */}
-      {trials.length > 0 && (
-        <motion.div variants={fadeUp} className="mb-12">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground mb-1">
-            Clinical Trials
-          </p>
-          <div className="divide-y divide-border">
-            {trials.map((trial) => (
-              <TrialCard key={trial.id} trial={trial} />
-            ))}
-          </div>
-        </motion.div>
-      )}
+          <TabsContent value="lawsuits" className="mt-5">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {lawsuits.map((lawsuit) => (
+                <LawsuitCard key={lawsuit.id} lawsuit={lawsuit} />
+              ))}
+            </div>
+          </TabsContent>
 
-      {/* Footer */}
-      <motion.div variants={fadeUp} className="pt-8 border-t border-border flex justify-center">
-        <Button
-          variant="ghost"
-          onClick={onRestart}
-          className="gap-2 text-sm text-muted-foreground hover:text-foreground"
-        >
-          <RotateCcw className="w-3.5 h-3.5" />
-          Start over with different accounts
+          <TabsContent value="trials" className="mt-5">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {trials.map((trial) => (
+                <TrialCard key={trial.id} trial={trial} />
+              ))}
+            </div>
+          </TabsContent>
+        </Tabs>
+      </motion.div>
+
+      <motion.div variants={item} className="flex justify-center pt-4">
+        <Button variant="outline" onClick={onRestart} className="gap-2">
+          <RotateCcw className="w-4 h-4" />
+          Start Over
         </Button>
       </motion.div>
     </motion.div>
