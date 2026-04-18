@@ -61,14 +61,20 @@ Return a JSON object with this exact structure:
   ]
 }
 
-Be scientifically accurate. Focus on chemicals with documented health risks like benzene, formaldehyde, talc, parabens, phthalates, PFAS, oxybenzone, aluminum compounds. Only return the JSON, no other text.`;
+Be scientifically accurate. Focus on chemicals with documented health risks like benzene, formaldehyde, talc, parabens, phthalates, PFAS, oxybenzone, aluminum compounds. Only return valid JSON, no markdown fences or other text.`;
 
-    console.log("Calling Gemini API...");
-    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`;
+    // Use x-goog-api-key header per official Gemini REST docs
+    const geminiUrl = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
+
+    console.log("Calling Gemini at:", geminiUrl);
+    console.log("API key starts with:", geminiKey.slice(0, 10) + "...");
 
     const geminiResponse = await fetch(geminiUrl, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": geminiKey,
+      },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
         generationConfig: {
@@ -80,11 +86,14 @@ Be scientifically accurate. Focus on chemicals with documented health risks like
 
     const responseText = await geminiResponse.text();
     console.log("Gemini status:", geminiResponse.status);
-    console.log("Gemini response:", responseText.slice(0, 500));
+    console.log("Gemini response preview:", responseText.slice(0, 300));
 
     if (!geminiResponse.ok) {
-      console.error("Gemini API error:", responseText);
-      throw new Error(`Gemini API error: ${geminiResponse.status} - ${responseText.slice(0, 200)}`);
+      console.error("Gemini API error full:", responseText);
+      return new Response(
+        JSON.stringify({ error: `Gemini API ${geminiResponse.status}`, details: responseText.slice(0, 500) }),
+        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
     }
 
     const geminiData = JSON.parse(responseText);
@@ -92,13 +101,14 @@ Be scientifically accurate. Focus on chemicals with documented health risks like
 
     if (!textContent) {
       console.error("No content in Gemini response:", JSON.stringify(geminiData).slice(0, 300));
-      throw new Error("No content in Gemini response");
+      return new Response(
+        JSON.stringify({ error: "No content in Gemini response", details: JSON.stringify(geminiData).slice(0, 300) }),
+        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
     }
 
     // Strip markdown code fences if present
     const cleanJson = textContent.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-    console.log("Parsing JSON:", cleanJson.slice(0, 200));
-
     const analysis = JSON.parse(cleanJson);
     console.log("Analysis complete. Score:", analysis.overallScore, "Chemicals:", analysis.chemicals?.length);
 
@@ -106,7 +116,7 @@ Be scientifically accurate. Focus on chemicals with documented health risks like
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (error) {
-    console.error("analyze-exposure error:", error.message);
+    console.error("analyze-exposure error:", error.message, error.stack);
     return new Response(
       JSON.stringify({ error: error.message }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }

@@ -20,11 +20,15 @@ async function invokeEdgeFunction(functionName: string, body: Record<string, unk
   const { data, error } = await supabase.functions.invoke(functionName, { body });
 
   if (error) {
+    // Try to read the actual response body for detailed error info
     console.error(`[api] ${functionName} error:`, error);
+    if (data) {
+      console.error(`[api] ${functionName} error body:`, JSON.stringify(data));
+    }
     throw error;
   }
 
-  console.log(`[api] ${functionName} success:`, JSON.stringify(data).slice(0, 200));
+  console.log(`[api] ${functionName} success:`, JSON.stringify(data).slice(0, 300));
   return data;
 }
 
