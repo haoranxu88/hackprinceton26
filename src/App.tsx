@@ -10,13 +10,20 @@ function App() {
   const [authReady, setAuthReady] = useState(false);
 
   useEffect(() => {
-    // Sign in anonymously so Edge Function calls pass auth
     const initAuth = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
         await supabase.auth.signInAnonymously();
       }
       setAuthReady(true);
+
+      // Debug: test if secrets are configured
+      try {
+        const { data } = await supabase.functions.invoke("debug-secrets");
+        console.log("[debug] Secrets check:", JSON.stringify(data, null, 2));
+      } catch (e) {
+        console.error("[debug] Secret check failed:", e);
+      }
     };
     initAuth();
   }, []);
