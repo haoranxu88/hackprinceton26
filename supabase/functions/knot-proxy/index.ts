@@ -17,66 +17,104 @@ Deno.serve(async (req) => {
       throw new Error("KNOT_CLIENT_ID or KNOT_SECRET not configured");
     }
 
-    // Base64 encode credentials for Basic Auth
-    const encoder = new TextEncoder();
-    const credentials = encoder.encode(`${clientId}:${secret}`);
-    const base64Credentials = btoa(String.fromCharCode(...credentials));
+    const base64Credentials = btoa(`${clientId}:${secret}`);
     const authHeader = `Basic ${base64Credentials}`;
-
     const baseUrl = "https://development.knotapi.com";
-    const { action, userId, merchantId, cursor, limit } = await req.json();
 
-    let response;
+    const body = await req.json();
+    const { action, userId, merchantId, cursor, limit } = body;
+    console.log("[knot] action:", action, "userId:", userId, "merchantId:", merchantId);
+
+    let url: string;
+    let requestBody: Record<string, unknown>;
 
     switch (action) {
+      case "list-merchants": {
+        url = `${baseUrl}/merchant/list`;
+        requestBody = { type: "transaction_link" };
+        break;
+      }
+
       case "create-session": {
-        console.log("Creating Knot session for user:", userId);
-        response = await fetch(`${baseUrl}/session/create`, {
-          method: "POST",
-          headers: {
-            "Authorization": authHeader,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            type: "transaction_link",
-            external_user_id: userId || `vigilant-${Date.now()}`,
-          }),
-        });
+        url = `${baseUrl}/session/create`;
+        requestBody = {
+          type: "transaction_link",
+          external_user_id: userId || `vigilant-${Date.now()}`,
+        };
         break;
       }
 
       case "link-account": {
-        console.log("Linking account for user:", userId, "merchant:", merchantId);
-        response = await fetch(`${baseUrl}/development/accounts/link`, {
-          method: "POST",
-          headers: {
-            "Authorization": authHeader,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            external_user_id: userId,
-            merchant_id: merchantId || 19,
-          }),
-        });
+        url = `${baseUrl}/development/accounts/link`;
+        requestBody = {
+          external_user_id: userId,
+          merchant_id: merchantId || 19,
+          transactions: { new: true },
+        };
         break;
       }
 
       case "sync-transactions": {
-        console.log("Syncing transactions for user:", userId, "merchant:", merchantId);
-        response = await fetch(`${baseUrl}/transactions/sync`, {
-          method: "POST",
-          headers: {
-            "Authorization": authHeader,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
+        // Poll for transactions since they're generated async after link-account
+        url = `${baseUrl}/transactions/sync`;
+        const syncLimit = limit || 50;
+        const maxAttempts = 6;
+        const delayMs = 3000;
+
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+          const syncBody: Record<string, unknown> = {
             merchant_id: merchantId || 19,
             external_user_id: userId,
-            cursor: cursor || undefined,
-            limit: limit || 50,
-          }),
+            limit: syncLimit,
+          };
+          if (cursor) syncBody.cursor = cursor;
+
+          console.log(`[knot] sync attempt ${attempt}/${maxAttempts}`);
+
+          const syncResp = await fetch(url, {
+            method: "POST",
+            headers: {
+              Authorization: authHeader,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(syncBody),
+          });
+
+          const syncText = await syncResp.text();
+          console.log(`[knot] sync status: ${syncResp.status}, preview: ${syncText.slice(0, 200)}`);
+
+          if (!syncResp.ok) {
+            return new Response(syncText, {
+              status: syncResp.status,
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+            });
+          }
+
+          const syncData = JSON.parse(syncText);
+
+          if (syncData.transactions && syncData.transactions.length > 0) {
+            console.log(`[knot] Found ${syncData.transactions.length} transactions on attempt ${attempt}`);
+            return new Response(JSON.stringify(syncData), {
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+            });
+          }
+
+          if (attempt < maxAttempts) {
+            console.log(`[knot] No transactions yet, waiting ${delayMs}ms...`);
+            await new Promise(r => setTimeout(r, delayMs));
+          } else {
+            // Return whatever we got on last attempt
+            console.log("[knot] Max attempts reached, returning empty");
+            return new Response(JSON.stringify(syncData), {
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+            });
+          }
+        }
+
+        // Should not reach here
+        return new Response(JSON.stringify({ transactions: [] }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
-        break;
       }
 
       default:
@@ -86,13 +124,30 @@ Deno.serve(async (req) => {
         );
     }
 
-    const data = await response.json();
-    console.log(`Knot ${action} response status:`, response.status);
+    // Execute non-sync requests
+    console.log(`[knot] ${action} -> ${url}`);
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: authHeader,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    const responseText = await response.text();
+    console.log(`[knot] ${action} status: ${response.status}`);
+
+    let data;
+    try {
+      data = JSON.parse(responseText);
+    } catch {
+      data = { raw: responseText };
+    }
 
     if (!response.ok) {
-      console.error("Knot API error:", JSON.stringify(data));
       return new Response(
-        JSON.stringify({ error: data.message || "Knot API error", details: data }),
+        JSON.stringify({ error: data.message || `Knot API error ${response.status}`, details: data }),
         { status: response.status, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -101,7 +156,7 @@ Deno.serve(async (req) => {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (error) {
-    console.error("knot-proxy error:", error);
+    console.error("[knot] error:", error.message);
     return new Response(
       JSON.stringify({ error: error.message }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }

@@ -1,10 +1,33 @@
+import { useEffect, useState } from "react";
 import { MockToggleProvider } from "@/hooks/useMockToggle";
 import { MockToggle } from "@/components/layout/MockToggle";
 import { WizardContainer } from "@/components/wizard/WizardContainer";
-import { Shield } from "lucide-react";
+import { Shield, Loader2 } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
 import "./index.css";
 
 function App() {
+  const [authReady, setAuthReady] = useState(false);
+
+  useEffect(() => {
+    const initAuth = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        await supabase.auth.signInAnonymously();
+      }
+      setAuthReady(true);
+    };
+    initAuth();
+  }, []);
+
+  if (!authReady) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <Loader2 className="w-6 h-6 animate-spin text-primary" />
+      </div>
+    );
+  }
+
   return (
     <MockToggleProvider>
       <div className="min-h-screen bg-background">

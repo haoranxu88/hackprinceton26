@@ -1,18 +1,31 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { motion } from "framer-motion";
 import { useMockToggle } from "@/hooks/useMockToggle";
-import { createKnotSession, linkKnotAccount, syncKnotTransactions } from "@/lib/api";
+import { listKnotMerchants, linkKnotAccount, syncKnotTransactions } from "@/lib/api";
 import { mockTransactions, type Transaction } from "@/data/mock-transactions";
 import { Link2, ShoppingBag, Store, Pill, ChevronRight, Database, Loader2, CheckCircle2 } from "lucide-react";
 
-const MERCHANTS = [
-  { id: 19, name: "Amazon", icon: ShoppingBag, color: "bg-accent/10 text-accent" },
-  { id: 4, name: "Walmart", icon: Store, color: "bg-primary/10 text-primary" },
-  { id: 46, name: "CVS", icon: Pill, color: "bg-destructive/10 text-destructive" },
+interface KnotMerchant {
+  id: number;
+  name: string;
+  category?: string;
+  logo?: string;
+}
+
+const FALLBACK_MERCHANTS: KnotMerchant[] = [
+  { id: 19, name: "DoorDash", category: "Food Delivery" },
+  { id: 45, name: "Walmart", category: "Online Shopping" },
+  { id: 46, name: "Wayfair", category: "Furniture" },
 ];
+
+const ICON_MAP: Record<string, typeof ShoppingBag> = {
+  "Online Shopping": ShoppingBag,
+  "Food Delivery": Store,
+  Pharmacy: Pill,
+};
 
 interface LinkAccountsStepProps {
   onNext: (transactions: Transaction[]) => void;
@@ -24,6 +37,27 @@ export function LinkAccountsStep({ onNext, onBack }: LinkAccountsStepProps) {
   const [loading, setLoading] = useState(false);
   const [linkedMerchants, setLinkedMerchants] = useState<number[]>([]);
   const [status, setStatus] = useState<string>("");
+  const [merchants, setMerchants] = useState<KnotMerchant[]>(FALLBACK_MERCHANTS);
+  const [loadingMerchants, setLoadingMerchants] = useState(false);
+  const collectedTransactions = useRef<Transaction[]>([]);
+
+  // Fetch real merchant list on mount (live mode)
+  useEffect(() => {
+    if (isMock) return;
+    setLoadingMerchants(true);
+    listKnotMerchants()
+      .then((data) => {
+        if (Array.isArray(data) && data.length > 0) {
+          // Show first 6 merchants max
+          setMerchants(data.slice(0, 6));
+          console.log("[link] Loaded", data.length, "merchants from Knot");
+        }
+      })
+      .catch((err) => {
+        console.warn("[link] Failed to load merchants, using fallbacks:", err);
+      })
+      .finally(() => setLoadingMerchants(false));
+  }, [isMock]);
 
   const handleUseDemoData = () => {
     onNext(mockTransactions);
@@ -37,41 +71,63 @@ export function LinkAccountsStep({ onNext, onBack }: LinkAccountsStepProps) {
 
     try {
       setLoading(true);
-      setStatus("Creating session...");
-      const userId = `vigilant-user-${Date.now()}`;
+      const userId = `vigilant-${Date.now()}`;
 
-      // Create session for TransactionLink
-      await createKnotSession(userId);
-
-      // In development, link account server-side
+      // Step 1: Link account + trigger transaction generation
       setStatus("Linking account...");
-      await linkKnotAccount(userId, merchantId);
+      console.log("[link] Linking merchant", merchantId, "for user", userId);
+      const linkResult = await linkKnotAccount(userId, merchantId);
+      console.log("[link] Link result:", linkResult);
 
-      // Sync transactions
-      setStatus("Syncing transactions...");
-      const result = await syncKnotTransactions(userId, merchantId);
+      // Step 2: Sync transactions (edge function polls with retries)
+      setStatus("Syncing transactions (may take a few seconds)...");
+      const syncResult = await syncKnotTransactions(userId, merchantId);
+      console.log("[link] Sync result:", JSON.stringify(syncResult).slice(0, 500));
 
       setLinkedMerchants((prev) => [...prev, merchantId]);
-      setStatus("");
 
-      if (result?.transactions) {
-        onNext(result.transactions);
+      // Map Knot transactions to our format
+      if (syncResult?.transactions && syncResult.transactions.length > 0) {
+        const mapped: Transaction[] = syncResult.transactions.map((t: Record<string, unknown>) => ({
+          id: (t.id as string) || `knot-${Date.now()}-${Math.random()}`,
+          datetime: (t.datetime as string) || new Date().toISOString(),
+          merchant: syncResult.merchant?.name || "Unknown",
+          order_status: (t.order_status as string) || "COMPLETED",
+          total: (t.price as Record<string, string>)?.total || "0",
+          products: ((t.products as Array<Record<string, unknown>>) || []).map((p) => ({
+            external_id: (p.external_id as string) || "",
+            name: (p.name as string) || "Unknown Product",
+            description: (p.description as string) || "",
+            image_url: (p.image_url as string) || "",
+            quantity: (p.quantity as number) || 1,
+            price: (p.price as { total: string; unit_price: string }) || { total: "0", unit_price: "0" },
+          })),
+        }));
+        collectedTransactions.current = [...collectedTransactions.current, ...mapped];
+        const productCount = mapped.reduce((s, t) => s + t.products.length, 0);
+        setStatus(`Synced ${mapped.length} orders with ${productCount} products`);
+      } else {
+        setStatus("Linked (no transactions yet -- try demo data for testing)");
       }
     } catch (err) {
-      console.error("Error linking merchant:", err);
-      setStatus("Error - falling back to demo data");
-      setTimeout(() => {
-        setStatus("");
-      }, 2000);
+      console.error("[link] Error:", err);
+      setStatus("Error connecting -- try demo data instead");
     } finally {
       setLoading(false);
+      setTimeout(() => setStatus(""), 5000);
     }
   };
 
   const handleProceed = () => {
-    if (isMock || linkedMerchants.length > 0) {
+    if (collectedTransactions.current.length > 0) {
+      onNext(collectedTransactions.current);
+    } else {
       onNext(mockTransactions);
     }
+  };
+
+  const getIcon = (merchant: KnotMerchant) => {
+    return ICON_MAP[merchant.category || ""] || ShoppingBag;
   };
 
   return (
@@ -95,49 +151,67 @@ export function LinkAccountsStep({ onNext, onBack }: LinkAccountsStepProps) {
       </div>
 
       <div className="w-full space-y-3 mb-6">
-        {MERCHANTS.map((merchant) => {
-          const isLinked = linkedMerchants.includes(merchant.id);
-          return (
-            <Card
-              key={merchant.id}
-              className={`transition-all duration-300 ${isLinked ? "border-primary/30 bg-primary/5" : "hover:shadow-elegant cursor-pointer"}`}
-            >
-              <CardContent className="p-4 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${merchant.color}`}>
-                    <merchant.icon className="w-5 h-5" />
+        {loadingMerchants ? (
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="w-5 h-5 animate-spin text-primary mr-2" />
+            <span className="text-sm text-muted-foreground">Loading merchants...</span>
+          </div>
+        ) : (
+          merchants.map((merchant) => {
+            const isLinked = linkedMerchants.includes(merchant.id);
+            const Icon = getIcon(merchant);
+            return (
+              <Card
+                key={merchant.id}
+                className={`transition-all duration-300 ${isLinked ? "border-primary/30 bg-primary/5" : "hover:shadow-elegant cursor-pointer"}`}
+              >
+                <CardContent className="p-4 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    {merchant.logo ? (
+                      <img
+                        src={merchant.logo}
+                        alt={merchant.name}
+                        className="w-10 h-10 rounded-xl object-contain bg-muted p-1"
+                      />
+                    ) : (
+                      <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-primary/10 text-primary">
+                        <Icon className="w-5 h-5" />
+                      </div>
+                    )}
+                    <div>
+                      <p className="font-semibold text-foreground text-sm">{merchant.name}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {merchant.category || "Transaction history"} &middot; ID: {merchant.id}
+                      </p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="font-semibold text-foreground text-sm">{merchant.name}</p>
-                    <p className="text-xs text-muted-foreground">Transaction history</p>
-                  </div>
-                </div>
-                {isLinked ? (
-                  <Badge variant="safe" className="gap-1">
-                    <CheckCircle2 className="w-3 h-3" />
-                    Linked
-                  </Badge>
-                ) : (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => handleLinkMerchant(merchant.id)}
-                    disabled={loading}
-                    className="gap-1"
-                  >
-                    {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : <ChevronRight className="w-3 h-3" />}
-                    Connect
-                  </Button>
-                )}
-              </CardContent>
-            </Card>
-          );
-        })}
+                  {isLinked ? (
+                    <Badge variant="safe" className="gap-1">
+                      <CheckCircle2 className="w-3 h-3" />
+                      Linked
+                    </Badge>
+                  ) : (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleLinkMerchant(merchant.id)}
+                      disabled={loading}
+                      className="gap-1"
+                    >
+                      {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : <ChevronRight className="w-3 h-3" />}
+                      Connect
+                    </Button>
+                  )}
+                </CardContent>
+              </Card>
+            );
+          })
+        )}
       </div>
 
       {status && (
         <p className="text-xs text-muted-foreground mb-4 flex items-center gap-2">
-          <Loader2 className="w-3 h-3 animate-spin" />
+          {loading && <Loader2 className="w-3 h-3 animate-spin" />}
           {status}
         </p>
       )}

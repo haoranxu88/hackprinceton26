@@ -1,209 +1,89 @@
-# Vigilant MVP - Final Build Plan
+# Plan: Fix Knot Transactions + Add Dedalus Integration
 
 ## Context
-Vigilant turns retail purchase data into health exposure insights, clinical trial matches, and class action lawsuit opportunities. Single-page wizard flow for HackPrinceton demo. All API keys provided. Real + mock data with a toggle (default: mock ON).
+Two integrations need fixing/adding:
+1. **Knot transactions return empty** -- we're using wrong request params and not waiting for async generation
+2. **Dedalus integration** -- key is stored but no edge function uses it yet
 
 ---
 
-## Regeneron Trials - How They Fit (Answering Q3)
+## Part 1: Fix Knot Transactions
 
-Regeneron is a biopharmaceutical company running clinical trials for drugs that treat conditions **caused by chemical exposure**. Here's the end-to-end flow:
+### Root Cause (from Knot docs)
+The `/development/accounts/link` endpoint generates transactions **asynchronously**. After calling link-account, Knot fires a `NEW_TRANSACTIONS_AVAILABLE` webhook, and THEN `/transactions/sync` returns data. Our current code calls sync **immediately** after link, before transactions are generated.
 
-```
-User links Amazon/Walmart account via KnotAPI
-  -> SKU-level products retrieved (e.g., "TRESemme Dry Shampoo", "Neutrogena Sunscreen")
-    -> Products mapped to chemicals (Benzene in dry shampoo, Formaldehyde in hair straightener)
-      -> Chemicals mapped to health risks (Benzene -> blood cancers like Multiple Myeloma)
-        -> Health risks matched to Regeneron trials treating those conditions:
-           - Linvoseltamab: treats Multiple Myeloma (linked to Benzene exposure)
-           - Ubamatamab: treats Ovarian Cancer (linked to PFAS/talc exposure)
-           - Dupixent: treats severe eczema/dermatitis (linked to irritant chemical exposure in skincare)
-```
+Additionally, our `transactions` param is wrong: we send `{ count: 10 }` but the API expects `{ new: true }`.
 
-**The pitch to Regeneron**: Instead of waiting for patients to show up sick at a hospital, Vigilant identifies people with *documented, quantified chemical exposure* from their purchase history -- before they get sick. These are the highest-fidelity pre-symptomatic candidates for preventive trials. This reduces their 80% enrollment failure rate by catching eligible people earlier.
+### Fix Strategy
 
----
+**A. Fix `knot-proxy` edge function** (`supabase/functions/knot-proxy/index.ts`):
+- Fix `link-account` body: change `transactions: { count: 10 }` to `transactions: { new: true }`
+- Add a new `list-merchants` action that calls `POST /merchant/list` with `type: "transaction_link"` so we can discover real merchant IDs
+- Add **polling logic** to `sync-transactions`: after linking, retry sync up to 5 times with 3-second delays (since dev environment generates 205 transactions "within a few seconds" per docs)
 
-## API Keys & Secrets
+**B. Fix `LinkAccountsStep.tsx`** (`src/components/wizard/LinkAccountsStep.tsx`):
+- Replace hardcoded merchant list with dynamic fetch from `list-merchants` on mount (show real merchant names/IDs from Knot)
+- Keep current 3 merchants as fallback if API fails
+- After linking, use polling sync (edge function handles retries) to wait for transactions
+- Use a unique `external_user_id` per session as docs recommend (e.g. `vigilant-{timestamp}`)
 
-| Service | Key | Storage |
-|---------|-----|---------|
-| KnotAPI | `client_id: dda0778d-9486-47f8-bd80-6f2512f9bcdb` / `secret: ff5e51b6dcf84a829898d37449cbc47a` | Enter Cloud Edge Function secrets |
-| Dedalus | `dsk-test-1e6c9c50feb6-2af6b7195f79ea53143a88619e90d20b` | Enter Cloud Edge Function secrets |
-| Gemini | `AIzaSyDERnmr62iCChYjNB-vHLXBzhWNMTFV2WE` | Enter Cloud Edge Function secrets |
+**C. Fix `api.ts`** (`src/lib/api.ts`):
+- Add `listKnotMerchants()` function
+- Keep existing `linkKnotAccount` and `syncKnotTransactions` unchanged (edge function handles the retry)
 
-**Base64 encoded KnotAPI auth**: `base64("dda0778d-9486-47f8-bd80-6f2512f9bcdb:ff5e51b6dcf84a829898d37449cbc47a")`
-
----
-
-## Architecture
-
-### Frontend (React/Vite/Tailwind)
-Single-page wizard with 5 steps, animated transitions, and a global **"Use Mock Data" toggle** (default ON) in the header.
-
-### Backend (Enter Cloud Edge Functions)
-3 Edge Functions that proxy to external APIs:
-
-1. **`knot-proxy`** -- Creates KnotAPI sessions + syncs transactions
-   - `POST /knot-proxy` with `action: "create-session" | "sync-transactions" | "link-account"`
-   - Handles base64 auth header construction server-side
-   - Calls `https://development.knotapi.com/session/create` and `/transactions/sync`
-
-2. **`analyze-exposure`** -- Uses Gemini to analyze products for chemical exposure
-   - Receives product list from KnotAPI transactions
-   - Calls Gemini API to identify hazardous chemicals in each product
-   - Returns chemical profiles + calculated exposure scores (using EPA DAevent formula)
-
-3. **`match-opportunities`** -- Uses Gemini to match exposure to lawsuits + trials
-   - Takes chemical exposure profile
-   - Returns matching class action lawsuits and clinical trials
-
-### Data Flow
-
-```
-[KnotAPI SDK] -> User links merchant account
-  -> [knot-proxy Edge Fn] -> Create session, link account, sync transactions
-    -> [analyze-exposure Edge Fn] -> Gemini analyzes product names for chemicals
-      -> [Frontend] -> Calculates Toxic Load Score using EPA formulas
-        -> [match-opportunities Edge Fn] -> Gemini matches to lawsuits + trials
-          -> [Frontend] -> Displays results in dashboard
-```
-
-### Mock Data Toggle
-- Toggle switch in app header, defaults to ON
-- When ON: skips all API calls, loads curated mock data
-- When OFF: calls real Edge Functions (KnotAPI -> Gemini pipeline)
-- Mock data includes realistic products with known chemical hazards
+### Files Modified
+- `supabase/functions/knot-proxy/index.ts` -- fix link body, add list-merchants, add sync polling
+- `src/components/wizard/LinkAccountsStep.tsx` -- dynamic merchants, better sync flow
+- `src/lib/api.ts` -- add listKnotMerchants
 
 ---
 
-## Component Architecture
+## Part 2: Add Dedalus Integration
 
-```
-src/
-├── App.tsx                          # Toggle + wizard controller
-├── index.css                        # Design system tokens
-├── lib/
-│   ├── utils.ts                     # shadcn cn() utility
-│   ├── exposure-calculator.ts       # EPA DA_event + ADD math
-│   ├── knot.ts                      # KnotAPI client helpers
-│   └── api.ts                       # Edge function callers
-├── data/
-│   ├── mock-transactions.ts         # Curated hazardous product purchases
-│   ├── mock-analysis.ts             # Pre-computed chemical profiles
-│   ├── mock-lawsuits.ts             # Real active class action settlements
-│   └── mock-trials.ts              # Regeneron pipeline trials
-├── hooks/
-│   ├── useWizard.ts                 # Step state management
-│   └── useMockToggle.ts            # Mock data context
-├── components/
-│   ├── ui/                          # shadcn primitives
-│   ├── layout/
-│   │   └── MockToggle.tsx           # Header toggle component
-│   ├── wizard/
-│   │   ├── WizardContainer.tsx      # Step management + framer-motion transitions
-│   │   ├── StepIndicator.tsx        # Progress bar with step labels
-│   │   ├── WelcomeStep.tsx          # Hero + 3 value prop cards
-│   │   ├── LinkAccountsStep.tsx     # KnotAPI SDK embed + "Use Demo Data" fallback
-│   │   ├── AnalysisStep.tsx         # Animated processing with chemical discovery
-│   │   ├── ExposureDashboard.tsx    # Charts + scores (Step 4)
-│   │   └── TakeActionStep.tsx       # Lawsuits + trials (Step 5)
-│   ├── exposure/
-│   │   ├── ToxicLoadGauge.tsx       # Circular SVG gauge (0-100)
-│   │   ├── ChemicalBreakdown.tsx    # Recharts bar chart
-│   │   ├── ProductTimeline.tsx      # Flagged purchases timeline
-│   │   └── RiskCategories.tsx       # Dermal/Inhalation/Ingestion cards
-│   ├── claims/
-│   │   ├── LawsuitCard.tsx          # Settlement card with match confidence
-│   │   └── ClaimForm.tsx            # Pre-filled form + PDF export
-│   └── trials/
-│       └── TrialCard.tsx            # Clinical trial match card
-```
+### What Dedalus Offers
+Dedalus provides an **OpenAI-compatible API** (`chat.completions.create`) that routes to any model from any provider. It also has a **Runner SDK** for agentic tool-calling loops, and **MCP server deployment**. Their DCS (machines) API is for cloud compute.
+
+For our hackathon, the most impactful Dedalus integration is using their **OpenAI-compatible chat API** as an alternative AI provider in our edge functions -- showing sponsor track usage. We can also use the **Runner** pattern if we want agent-style orchestration.
+
+### Integration Plan
+
+**A. Create `dedalus-agent` edge function** (`supabase/functions/dedalus-agent/index.ts`):
+- A new edge function that uses the Dedalus API key (`DEDALUS_API_KEY` already stored) 
+- OpenAI-compatible endpoint: `https://api.dedaluslabs.ai/v1/chat/completions`
+- Uses `X-API-Key` header with the Dedalus key
+- Accepts a `task` param: `"analyze"` or `"match"` to handle both use cases
+- Acts as a "Dedalus Agent" that the UI can invoke as an alternative to the current analyze-exposure/match-opportunities functions
+- Can be called with `model: "openai/gpt-5-nano"` or any model available on Dedalus
+
+**B. Add Dedalus as AI provider option** in existing edge functions:
+- Add `AI_PROVIDER = "dedalus"` option alongside `"enter"` and `"gemini"` in both `analyze-exposure` and `match-opportunities`
+- Dedalus uses OpenAI-compatible format: `POST /v1/chat/completions` with standard `messages` array
+- This lets judges see we integrated Dedalus as a real AI provider
+
+**C. Frontend: Show "Powered by" badge** in AnalysisStep:
+- Small badge showing which AI provider is being used
+- Demonstrates to hackathon judges that multiple providers are integrated
+
+### Files Modified
+- `supabase/functions/dedalus-agent/index.ts` -- new edge function (standalone Dedalus endpoint)
+- `supabase/functions/analyze-exposure/index.ts` -- add Dedalus as AI_PROVIDER option
+- `supabase/functions/match-opportunities/index.ts` -- add Dedalus as AI_PROVIDER option
+- `src/components/wizard/AnalysisStep.tsx` -- "Powered by" badge
 
 ---
 
-## KnotAPI Integration Details
+## Part 3: Cleanup
+- Remove `debug-secrets` edge function and KEY CHECK code from `App.tsx`
+- Remove stale console.logs
 
-### Session Creation (Edge Function)
-```
-POST https://development.knotapi.com/session/create
-Headers: Authorization: Basic <base64(client_id:secret)>
-Body: { type: "transaction_link", external_user_id: "<user_id>" }
-Returns: { session: "uuid" }
-```
-
-### Frontend SDK Usage
-```typescript
-import KnotapiJS from "knotapi-js";
-const knotapi = new KnotapiJS();
-knotapi.open({
-  sessionId: sessionFromEdgeFunction,
-  clientId: "dda0778d-9486-47f8-bd80-6f2512f9bcdb",  // client_id is public
-  environment: "development",
-  entryPoint: "vigilant-onboarding",
-  onSuccess: (details) => { /* proceed to analysis */ },
-  onEvent: (event, merchant, merchantId) => { /* track progress */ },
-  onExit: () => { /* handle close */ }
-});
-```
-
-### Development Testing (no SDK needed)
-```
-POST https://development.knotapi.com/development/accounts/link
-Body: { external_user_id: "test-user", merchant_id: 19 }
--> Generates 205 sample transactions
--> Then call POST /transactions/sync to retrieve them
-```
-
-### Transaction Object (what we get back)
-Each transaction contains `products[]` with:
-- `name`: "Band-Aid Adhesive Bandages Variety Pack"
-- `description`: full product description
-- `quantity`, `price`, `image_url`, `url`
-
-These product names + descriptions are what we feed into Gemini for chemical analysis.
-
----
-
-## Design System
-
-### Color Palette
-- **Primary**: Deep teal (#0F766E / hsl(175, 78%, 26%)) -- medical trust
-- **Accent**: Amber (#F59E0B) -- alerts and warnings
-- **Exposure scale**: Green -> Yellow -> Orange -> Red -> Purple (safe to critical)
-- **Background**: Slate-based neutrals with subtle gradients
-- **Cards**: Glass-morphism with subtle borders
-
-### Typography
-- Headers: Inter/system with tight tracking
-- Body: System font stack, clean and clinical
-
----
-
-## Implementation Order
-
-1. Enable Enter Cloud + store API secrets
-2. Scaffold project (Vite + React + Tailwind + shadcn)
-3. Design system tokens in index.css + tailwind.config.ts
-4. Install deps: `knotapi-js@next`, `recharts`, `framer-motion`
-5. Create mock data files (transactions, chemicals, lawsuits, trials)
-6. Build exposure-calculator.ts (EPA math)
-7. Build wizard container + step indicator
-8. Build all 5 wizard steps (Welcome -> Link -> Analysis -> Dashboard -> Action)
-9. Create Edge Functions (knot-proxy, analyze-exposure, match-opportunities)
-10. Wire up real API calls with mock toggle
-11. Polish animations, responsiveness, dark mode
-12. Lint + verify
+### Files Modified
+- `src/App.tsx` -- remove debug code
+- `supabase/functions/debug-secrets/index.ts` -- delete
 
 ---
 
 ## Verification
-- [ ] Mock toggle defaults ON, wizard works end-to-end with mock data
-- [ ] Toggling mock OFF triggers real KnotAPI session creation
-- [ ] KnotAPI SDK opens and allows merchant account linking
-- [ ] Exposure dashboard shows gauge, charts, product timeline
-- [ ] Take Action shows lawsuit cards + Regeneron trial cards
-- [ ] Claim form can be filled and exported
-- [ ] Responsive on mobile + desktop
-- [ ] All semantic tokens, no hardcoded colors
-- [ ] Lint passes clean
+1. **Knot**: Turn off demo mode, click Connect on a merchant -> should see real merchant names from Knot's list API -> after linking, sync should return transactions (205 in dev) after brief polling
+2. **Dedalus**: Switch AI_PROVIDER to "dedalus" and run analysis -> should get toxicology results via Dedalus API
+3. **Enter AI**: Default provider still works as before
+4. **Demo mode**: Still works with mock data, no regressions

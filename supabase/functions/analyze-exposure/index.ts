@@ -4,106 +4,119 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
+// === AI PROVIDER CONFIG ===
+// Options: "enter" (default), "gemini", "dedalus"
+const AI_PROVIDER = "enter";
+// ==========================
+
+async function callEnterAI(prompt: string): Promise<string> {
+  const token = Deno.env.get("AI_API_TOKEN_f11936aa39dd");
+  if (!token) throw new Error("AI_API_TOKEN not configured");
+  console.log("[analyze] Using Enter AI");
+  const response = await fetch("https://api.enter.pro/code/api/v1/ai/messages", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: "anthropic/claude-sonnet-4.5",
+      messages: [{ role: "user", content: prompt }],
+      stream: false, max_tokens: 4096, temperature: 0.2,
+    }),
+  });
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`Enter AI ${response.status}: ${errText.slice(0, 200)}`);
   }
+  const data = await response.json();
+  return data.content?.[0]?.text || (() => { throw new Error("Empty Enter AI response"); })();
+}
+
+async function callGemini(prompt: string): Promise<string> {
+  const geminiKey = Deno.env.get("GEMINI_API_KEY");
+  if (!geminiKey) throw new Error("GEMINI_API_KEY not configured");
+  console.log("[analyze] Using Gemini");
+  const url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-goog-api-key": geminiKey },
+      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.2, maxOutputTokens: 4096 } }),
+    });
+    if (resp.status === 429 && attempt < 3) { await new Promise(r => setTimeout(r, attempt * 5000)); continue; }
+    const text = await resp.text();
+    if (!resp.ok) throw new Error(`Gemini ${resp.status}: ${text.slice(0, 200)}`);
+    const data = JSON.parse(text);
+    return data.candidates?.[0]?.content?.parts?.[0]?.text || (() => { throw new Error("Empty Gemini response"); })();
+  }
+  throw new Error("Gemini max retries exceeded");
+}
+
+async function callDedalus(prompt: string): Promise<string> {
+  const apiKey = Deno.env.get("DEDALUS_API_KEY");
+  if (!apiKey) throw new Error("DEDALUS_API_KEY not configured");
+  console.log("[analyze] Using Dedalus");
+  const response = await fetch("https://api.dedaluslabs.ai/v1/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-API-Key": apiKey },
+    body: JSON.stringify({
+      model: "openai/gpt-4o-mini",
+      messages: [
+        { role: "system", content: "You are an EPA toxicology expert. Return only valid JSON." },
+        { role: "user", content: prompt },
+      ],
+      temperature: 0.2, max_tokens: 4096,
+    }),
+  });
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`Dedalus ${response.status}: ${errText.slice(0, 200)}`);
+  }
+  const data = await response.json();
+  return data.choices?.[0]?.message?.content || (() => { throw new Error("Empty Dedalus response"); })();
+}
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   try {
-    const geminiKey = Deno.env.get("GEMINI_API_KEY");
-    if (!geminiKey) throw new Error("GEMINI_API_KEY not configured");
-
     const { products } = await req.json();
-
-    if (!products || !Array.isArray(products) || products.length === 0) {
-      return new Response(
-        JSON.stringify({ error: "No products provided" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+    if (!products?.length) {
+      return new Response(JSON.stringify({ error: "No products provided" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    console.log(`Analyzing ${products.length} products for chemical exposure`);
+    console.log(`[analyze] ${products.length} products, provider: ${AI_PROVIDER}`);
 
     const productList = products
       .map((p: { name: string; description: string }, i: number) =>
-        `${i + 1}. "${p.name}" - ${p.description || "No description"}`
-      )
+        `${i + 1}. "${p.name}" - ${p.description || "No description"}`)
       .join("\n");
 
-    const prompt = `You are an EPA toxicology expert analyzing consumer products for hazardous chemical exposure.
+    const prompt = `Analyze these consumer products for hazardous chemicals.
 
-For each product below, identify any hazardous chemicals it likely contains based on known ingredient databases (CPDat, Open Food Facts, EWG).
-
-Products to analyze:
+Products:
 ${productList}
 
-Return a JSON object with this exact structure:
-{
-  "overallScore": <number 0-100, overall toxic load score>,
-  "percentile": <number, estimated population percentile>,
-  "riskLevel": "<safe|moderate|high|critical>",
-  "totalProductsScanned": ${products.length},
-  "flaggedProducts": <number of products containing hazardous chemicals>,
-  "chemicals": [
-    {
-      "chemical": "<chemical name>",
-      "casNumber": "<CAS number>",
-      "category": "<carcinogen|endocrine_disruptor|irritant|neurotoxin>",
-      "exposureRoute": "<dermal|inhalation|ingestion>",
-      "concentrationPpm": <estimated concentration in ppm>,
-      "kp": <permeability coefficient cm/hr>,
-      "contactTimeHrs": <typical contact time>,
-      "frequency": <estimated uses per month based on product type>,
-      "riskLevel": "<safe|moderate|high|critical>",
-      "products": [<list of product names containing this chemical>],
-      "healthEffects": [<list of health effects>]
-    }
-  ]
-}
+Return ONLY valid JSON (no markdown, no code fences):
+{"overallScore":<0-100>,"percentile":<number>,"riskLevel":"<safe|moderate|high|critical>","totalProductsScanned":${products.length},"flaggedProducts":<number>,"chemicals":[{"chemical":"<name>","casNumber":"<CAS>","category":"<carcinogen|endocrine_disruptor|irritant|neurotoxin>","exposureRoute":"<dermal|inhalation|ingestion>","concentrationPpm":<number>,"kp":<number>,"contactTimeHrs":<number>,"frequency":<number>,"riskLevel":"<safe|moderate|high|critical>","products":["<product names>"],"healthEffects":["<effects>"]}]}
 
-Be scientifically accurate. Focus on chemicals with documented health risks like benzene, formaldehyde, talc, parabens, phthalates, PFAS, oxybenzone, aluminum compounds. Only return the JSON, no other text.`;
+Focus on benzene, formaldehyde, talc, parabens, phthalates, PFAS, oxybenzone, aluminum.`;
 
-    const geminiResponse = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: {
-            temperature: 0.2,
-            maxOutputTokens: 4096,
-            responseMimeType: "application/json",
-          },
-        }),
-      }
-    );
+    const callProvider = { enter: callEnterAI, gemini: callGemini, dedalus: callDedalus }[AI_PROVIDER];
+    if (!callProvider) throw new Error(`Unknown provider: ${AI_PROVIDER}`);
 
-    if (!geminiResponse.ok) {
-      const errText = await geminiResponse.text();
-      console.error("Gemini API error:", errText);
-      throw new Error(`Gemini API error: ${geminiResponse.status}`);
-    }
-
-    const geminiData = await geminiResponse.json();
-    const textContent = geminiData.candidates?.[0]?.content?.parts?.[0]?.text;
-
-    if (!textContent) {
-      throw new Error("No content in Gemini response");
-    }
-
-    // Parse the JSON from Gemini's response
-    const analysis = JSON.parse(textContent);
-    console.log("Analysis complete. Score:", analysis.overallScore, "Chemicals found:", analysis.chemicals?.length);
+    const rawText = await callProvider(prompt);
+    const cleanJson = rawText.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+    const analysis = JSON.parse(cleanJson);
+    // Tag the provider for frontend display
+    analysis._provider = AI_PROVIDER;
+    console.log("[analyze] SUCCESS Score:", analysis.overallScore);
 
     return new Response(JSON.stringify(analysis), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (error) {
-    console.error("analyze-exposure error:", error);
-    return new Response(
-      JSON.stringify({ error: error.message }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    console.error("[analyze] CRASH:", error.message);
+    return new Response(JSON.stringify({ error: error.message }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 });
