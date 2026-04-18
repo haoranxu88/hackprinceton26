@@ -1,8 +1,10 @@
 import { useState } from "react";
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
 import type { Lawsuit } from "@/data/mock-lawsuits";
-import { FileText, ChevronDown, ChevronUp, Clock } from "lucide-react";
+import { Scale, Clock, ChevronDown, ChevronUp, FileText } from "lucide-react";
 
 interface LawsuitCardProps {
   lawsuit: Lawsuit;
@@ -11,100 +13,92 @@ interface LawsuitCardProps {
 export function LawsuitCard({ lawsuit }: LawsuitCardProps) {
   const [expanded, setExpanded] = useState(false);
 
-  const daysUntilDeadline =
-    lawsuit.deadline !== "TBD"
-      ? Math.max(
-          0,
-          Math.ceil((new Date(lawsuit.deadline).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
-        )
-      : null;
+  const daysUntilDeadline = lawsuit.deadline !== "TBD"
+    ? Math.max(0, Math.ceil((new Date(lawsuit.deadline).getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
+    : null;
 
   return (
-    <div className="py-6">
-      <div className="flex items-start justify-between gap-6">
-        {/* Left: main info */}
-        <div className="flex-1 min-w-0">
-          {/* Settlement amount as hero */}
-          <div className="flex flex-wrap items-baseline gap-3 mb-2">
-            <span className="font-display font-bold text-2xl text-foreground leading-none">
-              {lawsuit.settlementAmount}
-            </span>
-            <Badge
-              variant={lawsuit.status === "active" ? "default" : "secondary"}
-              className="text-[10px]"
-            >
-              {lawsuit.status}
-            </Badge>
-            <span className="text-xs text-muted-foreground">
-              {lawsuit.matchConfidence}% match
-            </span>
+    <Card className="overflow-hidden hover:shadow-elegant transition-all duration-300">
+      <CardHeader className="p-4 pb-3">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex items-start gap-3 min-w-0">
+            <div className="w-10 h-10 rounded-xl bg-accent/10 flex items-center justify-center shrink-0">
+              <Scale className="w-5 h-5 text-accent" />
+            </div>
+            <div className="min-w-0">
+              <CardTitle className="text-sm leading-tight">{lawsuit.title}</CardTitle>
+              <p className="text-xs text-muted-foreground mt-0.5">vs. {lawsuit.defendant}</p>
+            </div>
           </div>
-
-          <p className="font-semibold text-foreground text-sm mb-0.5">{lawsuit.title}</p>
-          <p className="text-sm text-muted-foreground mb-3">vs. {lawsuit.defendant}</p>
-
-          {/* Chemical tags */}
-          <div className="flex flex-wrap gap-1.5">
-            {lawsuit.matchedChemicals.map((c) => (
-              <Badge key={c} variant="critical" className="text-[10px]">
-                {c}
-              </Badge>
-            ))}
-            {lawsuit.matchedProducts.map((p) => (
-              <Badge key={p} variant="outline" className="text-[10px] text-muted-foreground">
-                {p}
-              </Badge>
-            ))}
-          </div>
+          <Badge variant={lawsuit.status === "active" ? "default" : "secondary"} className="shrink-0 text-[10px]">
+            {lawsuit.status}
+          </Badge>
         </div>
+      </CardHeader>
 
-        {/* Right: deadline + actions */}
-        <div className="flex flex-col items-end gap-3 shrink-0">
-          {daysUntilDeadline !== null && (
-            <p className="text-xs text-muted-foreground flex items-center gap-1">
+      <CardContent className="px-4 pb-3 space-y-3">
+        <div className="grid grid-cols-3 gap-2 text-center">
+          <div className="p-2 rounded-lg bg-muted/50">
+            <p className="text-xs text-muted-foreground">Settlement</p>
+            <p className="text-sm font-bold text-foreground">{lawsuit.settlementAmount}</p>
+          </div>
+          <div className="p-2 rounded-lg bg-muted/50">
+            <p className="text-xs text-muted-foreground">Match</p>
+            <p className="text-sm font-bold text-primary">{lawsuit.matchConfidence}%</p>
+          </div>
+          <div className="p-2 rounded-lg bg-muted/50">
+            <p className="text-xs text-muted-foreground">Deadline</p>
+            <p className="text-sm font-bold text-foreground flex items-center justify-center gap-1">
               <Clock className="w-3 h-3" />
-              {daysUntilDeadline}d left
+              {daysUntilDeadline !== null ? `${daysUntilDeadline}d` : "TBD"}
             </p>
-          )}
-          <Button size="sm" className="gap-1.5 text-xs font-semibold">
-            <FileText className="w-3 h-3" />
-            File Claim
-          </Button>
-          <button
-            onClick={() => setExpanded(!expanded)}
-            className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground hover:no-underline transition-colors flex items-center gap-1"
-          >
-            {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-            {expanded ? "Hide" : "Payout tiers"}
-          </button>
+          </div>
         </div>
-      </div>
 
-      {/* Expanded: description + payout tiers */}
-      {expanded && (
-        <div className="mt-5 pt-5 border-t border-border space-y-4">
-          <p className="text-sm text-muted-foreground leading-relaxed">{lawsuit.description}</p>
+        <div className="flex flex-wrap gap-1">
+          {lawsuit.matchedChemicals.map((c) => (
+            <Badge key={c} variant="critical" className="text-[10px]">{c}</Badge>
+          ))}
+          {lawsuit.matchedProducts.map((p) => (
+            <Badge key={p} variant="outline" className="text-[10px] text-foreground">{p}</Badge>
+          ))}
+        </div>
 
-          <div>
-            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-3">
-              Payout Tiers
-            </p>
-            <div className="space-y-0 divide-y divide-border">
+        {expanded && (
+          <>
+            <Separator />
+            <p className="text-xs text-muted-foreground leading-relaxed">{lawsuit.description}</p>
+            <div className="space-y-2">
+              <p className="text-xs font-semibold text-foreground">Payout Tiers:</p>
               {lawsuit.payoutTiers.map((tier) => (
-                <div key={tier.tier} className="flex items-start justify-between py-3 gap-4">
+                <div key={tier.tier} className="flex items-center justify-between p-2 rounded-lg bg-muted/30 text-xs">
                   <div>
-                    <p className="text-sm font-semibold text-foreground">{tier.tier}</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">{tier.requirement}</p>
+                    <p className="font-medium text-foreground">{tier.tier}</p>
+                    <p className="text-muted-foreground">{tier.requirement}</p>
                   </div>
-                  <span className="font-display font-bold text-primary text-sm shrink-0">
-                    {tier.amount}
-                  </span>
+                  <span className="font-bold text-primary">{tier.amount}</span>
                 </div>
               ))}
             </div>
-          </div>
-        </div>
-      )}
-    </div>
+          </>
+        )}
+      </CardContent>
+
+      <CardFooter className="px-4 pb-4 gap-2">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setExpanded(!expanded)}
+          className="text-xs gap-1"
+        >
+          {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+          {expanded ? "Less" : "Details"}
+        </Button>
+        <Button variant="default" size="sm" className="ml-auto gap-1 text-xs">
+          <FileText className="w-3 h-3" />
+          File Claim
+        </Button>
+      </CardFooter>
+    </Card>
   );
 }

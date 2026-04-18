@@ -11,10 +11,6 @@ export default {
       screens: { "2xl": "1400px" },
     },
     extend: {
-      fontFamily: {
-        display: ['"Big Shoulders Display"', 'system-ui', 'sans-serif'],
-        sans: ['Mulish', 'system-ui', 'sans-serif'],
-      },
       colors: {
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",

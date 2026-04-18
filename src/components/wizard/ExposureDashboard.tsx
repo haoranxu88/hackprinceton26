@@ -1,15 +1,15 @@
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
 import { ToxicLoadGauge } from "@/components/exposure/ToxicLoadGauge";
 import { ChemicalBreakdown } from "@/components/exposure/ChemicalBreakdown";
 import { ProductTimeline } from "@/components/exposure/ProductTimeline";
 import { RiskCategories } from "@/components/exposure/RiskCategories";
-import { Badge } from "@/components/ui/badge";
 import type { ExposureAnalysis } from "@/data/mock-analysis";
 import type { Transaction } from "@/data/mock-transactions";
-import { ArrowRight, ArrowLeft } from "lucide-react";
-
-const EASE_EXPO = [0.16, 1, 0.3, 1] as const;
+import { AlertTriangle, ArrowRight, FlaskConical, Package } from "lucide-react";
 
 interface ExposureDashboardProps {
   analysis: ExposureAnalysis;
@@ -18,139 +18,116 @@ interface ExposureDashboardProps {
   onBack: () => void;
 }
 
-const stagger = {
-  hidden: {},
-  show: { transition: { staggerChildren: 0.08 } },
-};
-
-const fadeUp = {
+const item = {
   hidden: { opacity: 0, y: 20 },
-  show: { opacity: 1, y: 0, transition: { duration: 0.45, ease: EASE_EXPO } },
+  show: { opacity: 1, y: 0, transition: { duration: 0.5 } },
 };
 
 export function ExposureDashboard({ analysis, transactions, onNext, onBack }: ExposureDashboardProps) {
   return (
     <motion.div
-      variants={stagger}
       initial="hidden"
       animate="show"
-      exit={{ opacity: 0, y: -12 }}
-      className="max-w-4xl mx-auto px-2 py-8"
+      transition={{ staggerChildren: 0.1 }}
+      className="max-w-4xl mx-auto px-4 py-4 space-y-6"
     >
-      {/* Hero section */}
-      <motion.div variants={fadeUp} className="mb-12">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-primary mb-6">
+      {/* Header stats */}
+      <motion.div variants={item} className="text-center">
+        <h2 className="text-2xl sm:text-3xl font-bold text-foreground mb-1">
           Exposure Report
-        </p>
-
-        <h2
-          className="font-display font-bold leading-[0.92] tracking-tight text-foreground mb-6"
-          style={{ fontSize: "clamp(2rem, 5vw, 3.75rem)" }}
-        >
-          {analysis.flaggedProducts} of your {analysis.totalProductsScanned} scanned
-          <br />
-          products contain hazardous chemicals.
         </h2>
-
-        <p className="text-lg text-muted-foreground leading-relaxed mb-8" style={{ maxWidth: "58ch" }}>
-          {analysis.chemicals.length} substances identified — including carcinogens and
-          endocrine disruptors. Your exposure places you in the{" "}
-          <span className="font-semibold text-foreground">{analysis.percentile}th percentile</span> of
-          users screened. You may have grounds for legal recourse.
+        <p className="text-muted-foreground text-sm">
+          Based on {analysis.totalProductsScanned} products scanned from your purchase history
         </p>
-
-        {/* Three-stat row */}
-        <div className="flex flex-wrap gap-8 pt-8 border-t border-border">
-          <div>
-            <p className="font-display font-bold text-foreground text-3xl leading-none mb-1.5">
-              {analysis.overallScore}
-              <span className="text-lg text-muted-foreground font-normal">/100</span>
-            </p>
-            <p className="text-xs text-muted-foreground">Toxic Load Score</p>
-          </div>
-          <div>
-            <p className="font-display font-bold text-foreground text-3xl leading-none mb-1.5">
-              {analysis.percentile}
-              <span className="text-lg text-muted-foreground font-normal">th</span>
-            </p>
-            <p className="text-xs text-muted-foreground">Population percentile</p>
-          </div>
-          <div>
-            <p className="font-display font-bold text-foreground text-3xl leading-none mb-1.5">
-              {analysis.chemicals.length}
-            </p>
-            <p className="text-xs text-muted-foreground">Chemicals detected</p>
-          </div>
-          <div>
-            <p className="font-display font-bold text-foreground text-3xl leading-none mb-1.5">
-              {analysis.flaggedProducts}
-            </p>
-            <p className="text-xs text-muted-foreground">Products flagged</p>
-          </div>
-        </div>
       </motion.div>
 
-      {/* Chemical badges */}
-      <motion.div variants={fadeUp} className="flex flex-wrap gap-2 mb-10">
-        {analysis.chemicals.map((c) => (
-          <Badge
-            key={c.chemical}
-            variant={c.riskLevel as "safe" | "moderate" | "high" | "critical"}
-            className="text-xs"
-          >
-            {c.chemical} — {c.category.replace("_", " ")}
-          </Badge>
-        ))}
-      </motion.div>
-
-      {/* Charts */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-10">
-        <motion.div variants={fadeUp} className="space-y-6">
-          <div>
-            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-4">
-              Toxic Load
-            </p>
-            <div className="flex justify-center">
-              <ToxicLoadGauge score={analysis.overallScore} percentile={analysis.percentile} />
+      {/* Alert banner */}
+      {analysis.riskLevel !== "safe" && (
+        <motion.div variants={item}>
+          <div className="flex items-center gap-3 p-3 rounded-xl bg-destructive/10 border border-destructive/20">
+            <AlertTriangle className="w-5 h-5 text-destructive shrink-0" />
+            <div>
+              <p className="text-sm font-semibold text-foreground">
+                {analysis.flaggedProducts} of {analysis.totalProductsScanned} products flagged
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {analysis.chemicals.length} hazardous chemicals detected across your purchase history
+              </p>
             </div>
           </div>
-          <div>
-            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-4">
-              Exposure Routes
-            </p>
-            <RiskCategories chemicals={analysis.chemicals} />
-          </div>
+        </motion.div>
+      )}
+
+      {/* Main grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        {/* Left: Gauge + Risk Categories */}
+        <motion.div variants={item} className="space-y-5">
+          <Card>
+            <CardContent className="p-6 flex justify-center">
+              <ToxicLoadGauge score={analysis.overallScore} percentile={analysis.percentile} />
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="p-4 pb-2">
+              <CardTitle className="text-sm flex items-center gap-2">
+                <FlaskConical className="w-4 h-4 text-primary" />
+                Exposure Routes
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-4 pt-2">
+              <RiskCategories chemicals={analysis.chemicals} />
+            </CardContent>
+          </Card>
         </motion.div>
 
-        <motion.div variants={fadeUp} className="lg:col-span-2 space-y-6">
-          <div>
-            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-4">
-              Chemical Concentration Analysis
-            </p>
-            <ChemicalBreakdown chemicals={analysis.chemicals} />
-          </div>
-          <div>
-            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-4">
-              Flagged Products Timeline
-            </p>
-            <ProductTimeline transactions={transactions} chemicals={analysis.chemicals} />
-          </div>
+        {/* Center: Chemical Breakdown Chart */}
+        <motion.div variants={item} className="lg:col-span-2 space-y-5">
+          <Card>
+            <CardHeader className="p-4 pb-2">
+              <CardTitle className="text-sm flex items-center gap-2">
+                <FlaskConical className="w-4 h-4 text-primary" />
+                Chemical Concentration Analysis
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-4 pt-2">
+              <ChemicalBreakdown chemicals={analysis.chemicals} />
+              <Separator className="my-3" />
+              <div className="flex flex-wrap gap-2">
+                {analysis.chemicals.map((c) => (
+                  <Badge
+                    key={c.chemical}
+                    variant={c.riskLevel as "safe" | "moderate" | "high" | "critical"}
+                    className="text-[10px]"
+                  >
+                    {c.chemical}: {c.category.replace("_", " ")}
+                  </Badge>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="p-4 pb-2">
+              <CardTitle className="text-sm flex items-center gap-2">
+                <Package className="w-4 h-4 text-primary" />
+                Flagged Products Timeline
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-4 pt-2">
+              <ProductTimeline transactions={transactions} chemicals={analysis.chemicals} />
+            </CardContent>
+          </Card>
         </motion.div>
       </div>
 
       {/* Navigation */}
-      <motion.div variants={fadeUp} className="flex items-center gap-4 pt-4 border-t border-border">
-        <Button
-          variant="ghost"
-          onClick={onBack}
-          className="gap-1.5 text-sm px-0 hover:bg-transparent text-muted-foreground hover:text-foreground"
-        >
-          <ArrowLeft className="w-3.5 h-3.5" />
+      <motion.div variants={item} className="flex gap-3 pt-2">
+        <Button variant="ghost" onClick={onBack} className="flex-1">
           Back
         </Button>
-        <Button size="lg" onClick={onNext} className="group gap-2 font-semibold ml-auto">
-          See What You're Owed
-          <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-0.5" />
+        <Button variant="hero" size="lg" onClick={onNext} className="flex-1 gap-2">
+          See Your Opportunities
+          <ArrowRight className="w-4 h-4" />
         </Button>
       </motion.div>
     </motion.div>
