@@ -46,8 +46,6 @@ export function AnalysisStep({ transactions, onComplete }: AnalysisStepProps) {
           setStage(i);
           const startProgress = (i / STAGES.length) * 100;
           const endProgress = ((i + 1) / STAGES.length) * 100;
-
-          // Animate progress within stage
           const steps = 20;
           for (let j = 0; j <= steps; j++) {
             await new Promise((r) => setTimeout(r, STAGES[i].duration / steps));
@@ -58,26 +56,56 @@ export function AnalysisStep({ transactions, onComplete }: AnalysisStepProps) {
         onComplete(mockAnalysis, mockLawsuits, mockTrials);
       } else {
         try {
-          // Real API flow
-          setStage(0);
-          setProgress(10);
+          // Extract all products from transactions
           const allProducts = transactions.flatMap((t) =>
-            t.products.map((p) => ({ name: p.name, description: p.description }))
-          );
+            (t.products || []).map((p) => ({
+              name: p.name || "Unknown Product",
+              description: p.description || "",
+            }))
+          ).filter((p) => p.name && p.name !== "Unknown Product");
 
+          console.log("[analysis] Products to analyze:", allProducts.length, allProducts.slice(0, 3));
+
+          if (allProducts.length === 0) {
+            console.warn("[analysis] No products found, using mock data");
+            completedRef.current = true;
+            onComplete(mockAnalysis, mockLawsuits, mockTrials);
+            return;
+          }
+
+          // Stage 1: Scan products
+          setStage(0);
+          setProgress(15);
+          await new Promise((r) => setTimeout(r, 500));
+
+          // Stage 2: Analyze with Gemini via Edge Function
           setStage(1);
           setProgress(30);
+          console.log("[analysis] Calling analyze-exposure with", allProducts.length, "products");
           const analysisResult = await analyzeExposure(allProducts);
+          console.log("[analysis] Result:", JSON.stringify(analysisResult).slice(0, 300));
 
+          // Stage 3: Calculate scores
           setStage(2);
           setProgress(60);
           const chemicals = analysisResult?.chemicals?.map(
             (c: { chemical: string }) => c.chemical
           ) ?? [];
+          console.log("[analysis] Chemicals found:", chemicals);
 
+          if (chemicals.length === 0) {
+            console.warn("[analysis] No chemicals found, using mock data");
+            completedRef.current = true;
+            onComplete(analysisResult || mockAnalysis, mockLawsuits, mockTrials);
+            return;
+          }
+
+          // Stage 4: Match opportunities
           setStage(3);
           setProgress(80);
+          console.log("[analysis] Calling match-opportunities with", chemicals.length, "chemicals");
           const opportunities = await matchOpportunities(chemicals);
+          console.log("[analysis] Opportunities:", JSON.stringify(opportunities).slice(0, 300));
 
           setProgress(100);
           completedRef.current = true;
@@ -87,7 +115,7 @@ export function AnalysisStep({ transactions, onComplete }: AnalysisStepProps) {
             opportunities?.trials ?? mockTrials
           );
         } catch (err) {
-          console.error("Analysis error, falling back to mock:", err);
+          console.error("[analysis] Error, falling back to mock:", err);
           completedRef.current = true;
           onComplete(mockAnalysis, mockLawsuits, mockTrials);
         }
@@ -107,6 +135,7 @@ export function AnalysisStep({ transactions, onComplete }: AnalysisStepProps) {
   }, [discoveredIdx]);
 
   const currentStage = STAGES[Math.min(stage, STAGES.length - 1)];
+  const totalProducts = transactions.reduce((sum, t) => sum + (t.products?.length || 0), 0);
 
   return (
     <motion.div
@@ -163,7 +192,7 @@ export function AnalysisStep({ transactions, onComplete }: AnalysisStepProps) {
       </div>
 
       <p className="text-xs text-muted-foreground mt-6">
-        Scanning {transactions.reduce((sum, t) => sum + t.products.length, 0)} products across {transactions.length} orders
+        Scanning {totalProducts} products across {transactions.length} orders
       </p>
     </motion.div>
   );

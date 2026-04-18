@@ -1,10 +1,10 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { motion } from "framer-motion";
 import { useMockToggle } from "@/hooks/useMockToggle";
-import { createKnotSession, linkKnotAccount, syncKnotTransactions } from "@/lib/api";
+import { linkKnotAccount, syncKnotTransactions } from "@/lib/api";
 import { mockTransactions, type Transaction } from "@/data/mock-transactions";
 import { Link2, ShoppingBag, Store, Pill, ChevronRight, Database, Loader2, CheckCircle2 } from "lucide-react";
 
@@ -24,6 +24,7 @@ export function LinkAccountsStep({ onNext, onBack }: LinkAccountsStepProps) {
   const [loading, setLoading] = useState(false);
   const [linkedMerchants, setLinkedMerchants] = useState<number[]>([]);
   const [status, setStatus] = useState<string>("");
+  const collectedTransactions = useRef<Transaction[]>([]);
 
   const handleUseDemoData = () => {
     onNext(mockTransactions);
@@ -37,39 +38,56 @@ export function LinkAccountsStep({ onNext, onBack }: LinkAccountsStepProps) {
 
     try {
       setLoading(true);
-      setStatus("Creating session...");
-      const userId = `vigilant-user-${Date.now()}`;
+      // Use a stable user ID so we can sync across merchants
+      const userId = `vigilant-demo-user`;
 
-      // Create session for TransactionLink
-      await createKnotSession(userId);
-
-      // In development, link account server-side
+      // Step 1: Link account + generate sample transactions
       setStatus("Linking account...");
-      await linkKnotAccount(userId, merchantId);
+      console.log("[link] Linking merchant", merchantId, "for user", userId);
+      const linkResult = await linkKnotAccount(userId, merchantId);
+      console.log("[link] Link result:", linkResult);
 
-      // Sync transactions
+      // Step 2: Sync transactions
       setStatus("Syncing transactions...");
-      const result = await syncKnotTransactions(userId, merchantId);
+      const syncResult = await syncKnotTransactions(userId, merchantId);
+      console.log("[link] Sync result:", JSON.stringify(syncResult).slice(0, 500));
 
       setLinkedMerchants((prev) => [...prev, merchantId]);
-      setStatus("");
 
-      if (result?.transactions) {
-        onNext(result.transactions);
+      // Map Knot transactions to our format
+      if (syncResult?.transactions && syncResult.transactions.length > 0) {
+        const mapped: Transaction[] = syncResult.transactions.map((t: Record<string, unknown>) => ({
+          id: (t.id as string) || `knot-${Date.now()}`,
+          date: (t.datetime as string) || new Date().toISOString(),
+          merchant: syncResult.merchant?.name || "Unknown",
+          total: parseFloat((t.price as Record<string, string>)?.total || "0"),
+          products: ((t.products as Array<Record<string, unknown>>) || []).map((p) => ({
+            name: (p.name as string) || "Unknown Product",
+            description: (p.description as string) || "",
+            price: parseFloat((p.price as Record<string, string>)?.total || "0"),
+            quantity: (p.quantity as number) || 1,
+            imageUrl: (p.image_url as string) || undefined,
+          })),
+        }));
+        collectedTransactions.current = [...collectedTransactions.current, ...mapped];
+        setStatus(`Synced ${mapped.length} orders with ${mapped.reduce((s, t) => s + t.products.length, 0)} products`);
+      } else {
+        setStatus("Account linked (no transactions yet - try syncing again or use demo data)");
       }
     } catch (err) {
       console.error("Error linking merchant:", err);
-      setStatus("Error - falling back to demo data");
-      setTimeout(() => {
-        setStatus("");
-      }, 2000);
+      setStatus("Error connecting - try demo data instead");
     } finally {
       setLoading(false);
+      setTimeout(() => setStatus(""), 4000);
     }
   };
 
   const handleProceed = () => {
-    if (isMock || linkedMerchants.length > 0) {
+    if (collectedTransactions.current.length > 0) {
+      onNext(collectedTransactions.current);
+    } else {
+      // Fallback to mock if no real transactions
       onNext(mockTransactions);
     }
   };
@@ -137,7 +155,7 @@ export function LinkAccountsStep({ onNext, onBack }: LinkAccountsStepProps) {
 
       {status && (
         <p className="text-xs text-muted-foreground mb-4 flex items-center gap-2">
-          <Loader2 className="w-3 h-3 animate-spin" />
+          {loading && <Loader2 className="w-3 h-3 animate-spin" />}
           {status}
         </p>
       )}
