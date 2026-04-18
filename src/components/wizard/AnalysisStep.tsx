@@ -1,7 +1,6 @@
 import { useEffect, useState, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
 import { useMockToggle } from "@/hooks/useMockToggle";
 import { mockAnalysis, type ExposureAnalysis } from "@/data/mock-analysis";
 import { mockLawsuits } from "@/data/mock-lawsuits";
@@ -10,7 +9,8 @@ import { analyzeExposure, matchOpportunities } from "@/lib/api";
 import type { Transaction } from "@/data/mock-transactions";
 import type { Lawsuit } from "@/data/mock-lawsuits";
 import type { ClinicalTrial } from "@/data/mock-trials";
-import { Scan, FlaskConical, AlertTriangle, CheckCircle2 } from "lucide-react";
+
+const EASE_EXPO = [0.16, 1, 0.3, 1] as const;
 
 interface AnalysisStepProps {
   transactions: Transaction[];
@@ -18,15 +18,22 @@ interface AnalysisStepProps {
 }
 
 const STAGES = [
-  { label: "Scanning product labels", icon: Scan, duration: 1200 },
-  { label: "Cross-referencing EPA chemical database", icon: FlaskConical, duration: 1500 },
-  { label: "Calculating exposure scores", icon: AlertTriangle, duration: 1000 },
-  { label: "Matching legal & clinical opportunities", icon: CheckCircle2, duration: 800 },
+  { label: "Scanning product labels", duration: 1200 },
+  { label: "Cross-referencing EPA chemical database", duration: 1500 },
+  { label: "Calculating exposure scores", duration: 1000 },
+  { label: "Matching legal & clinical opportunities", duration: 800 },
 ];
 
-const DISCOVERED_CHEMICALS = [
-  "Benzene", "Formaldehyde", "Talc (Asbestos)", "Parabens",
-  "Aluminum Compounds", "Oxybenzone (BP-3)",
+const DISCOVERED_CHEMICALS: Array<{
+  name: string;
+  variant: "safe" | "moderate" | "high" | "critical";
+}> = [
+  { name: "Benzene", variant: "critical" },
+  { name: "Formaldehyde", variant: "high" },
+  { name: "Talc (Asbestos)", variant: "high" },
+  { name: "Parabens", variant: "moderate" },
+  { name: "Aluminum Compounds", variant: "moderate" },
+  { name: "Oxybenzone", variant: "moderate" },
 ];
 
 export function AnalysisStep({ transactions, onComplete }: AnalysisStepProps) {
@@ -35,19 +42,17 @@ export function AnalysisStep({ transactions, onComplete }: AnalysisStepProps) {
   const [progress, setProgress] = useState(0);
   const [discoveredIdx, setDiscoveredIdx] = useState(0);
   const completedRef = useRef(false);
+  const totalProducts = transactions.reduce((s, t) => s + t.products.length, 0);
 
   useEffect(() => {
     if (completedRef.current) return;
 
     const runAnalysis = async () => {
       if (isMock) {
-        // Animate through stages with mock data
         for (let i = 0; i < STAGES.length; i++) {
           setStage(i);
           const startProgress = (i / STAGES.length) * 100;
           const endProgress = ((i + 1) / STAGES.length) * 100;
-
-          // Animate progress within stage
           const steps = 20;
           for (let j = 0; j <= steps; j++) {
             await new Promise((r) => setTimeout(r, STAGES[i].duration / steps));
@@ -58,7 +63,6 @@ export function AnalysisStep({ transactions, onComplete }: AnalysisStepProps) {
         onComplete(mockAnalysis, mockLawsuits, mockTrials);
       } else {
         try {
-          // Real API flow
           setStage(0);
           setProgress(10);
           const allProducts = transactions.flatMap((t) =>
@@ -86,8 +90,7 @@ export function AnalysisStep({ transactions, onComplete }: AnalysisStepProps) {
             opportunities?.lawsuits ?? mockLawsuits,
             opportunities?.trials ?? mockTrials
           );
-        } catch (err) {
-          console.error("Analysis error, falling back to mock:", err);
+        } catch {
           completedRef.current = true;
           onComplete(mockAnalysis, mockLawsuits, mockTrials);
         }
@@ -97,74 +100,77 @@ export function AnalysisStep({ transactions, onComplete }: AnalysisStepProps) {
     runAnalysis();
   }, [isMock, transactions, onComplete]);
 
-  // Discover chemicals one by one
   useEffect(() => {
     if (discoveredIdx >= DISCOVERED_CHEMICALS.length) return;
-    const timer = setTimeout(() => {
-      setDiscoveredIdx((prev) => prev + 1);
-    }, 700);
+    const timer = setTimeout(() => setDiscoveredIdx((p) => p + 1), 750);
     return () => clearTimeout(timer);
   }, [discoveredIdx]);
-
-  const currentStage = STAGES[Math.min(stage, STAGES.length - 1)];
 
   return (
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="flex flex-col items-center justify-center min-h-[70vh] px-4"
+      transition={{ duration: 0.3 }}
+      className="flex flex-col items-center justify-center min-h-[calc(100vh-8rem)] px-6 text-center"
     >
-      <div className="relative mb-8">
-        <div className="w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center">
-          <currentStage.icon className="w-9 h-9 text-primary" />
-        </div>
-        <div className="absolute inset-0 w-20 h-20 rounded-full border-2 border-primary/30 animate-pulse-ring" />
+      {/* Large percentage counter */}
+      <motion.div
+        initial={{ opacity: 0, scale: 0.9 }}
+        animate={{ opacity: 1, scale: 1 }}
+        transition={{ duration: 0.5, ease: EASE_EXPO }}
+        className="font-display font-bold text-primary font-tabular leading-none mb-2"
+        style={{ fontSize: "clamp(5rem, 20vw, 12rem)" }}
+      >
+        {Math.round(progress)}
+        <span className="text-[0.35em] text-muted-foreground">%</span>
+      </motion.div>
+
+      {/* Thin progress bar */}
+      <div className="w-full max-w-xs h-px bg-border mb-8 relative overflow-hidden rounded-full">
+        <motion.div
+          className="absolute inset-y-0 left-0 bg-primary rounded-full"
+          initial={{ width: "0%" }}
+          animate={{ width: `${progress}%` }}
+          transition={{ duration: 0.3, ease: "easeOut" }}
+        />
       </div>
 
-      <h2 className="text-xl sm:text-2xl font-bold text-foreground mb-2 text-center">
-        Analyzing Your Products
-      </h2>
-      <p className="text-muted-foreground text-sm mb-6 text-center max-w-md">
-        {currentStage.label}...
+      {/* Stage label */}
+      <AnimatePresence mode="wait">
+        <motion.p
+          key={stage}
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -8 }}
+          transition={{ duration: 0.25 }}
+          className="text-sm font-medium text-foreground mb-2"
+        >
+          {STAGES[Math.min(stage, STAGES.length - 1)].label}
+        </motion.p>
+      </AnimatePresence>
+
+      <p className="text-xs text-muted-foreground mb-12">
+        {totalProducts} products across {transactions.length} orders
       </p>
 
-      <div className="w-full max-w-sm mb-8">
-        <Progress value={progress} className="h-2" />
-        <p className="text-xs text-muted-foreground mt-2 text-center">
-          {Math.round(progress)}% complete
-        </p>
-      </div>
-
-      <div className="flex flex-wrap justify-center gap-2 max-w-lg">
+      {/* Discovered chemicals */}
+      <div className="flex flex-wrap justify-center gap-2 max-w-sm">
         <AnimatePresence>
-          {DISCOVERED_CHEMICALS.slice(0, discoveredIdx).map((chem) => (
+          {DISCOVERED_CHEMICALS.slice(0, discoveredIdx).map(({ name, variant }) => (
             <motion.div
-              key={chem}
-              initial={{ opacity: 0, scale: 0.5 }}
+              key={name}
+              initial={{ opacity: 0, scale: 0.7 }}
               animate={{ opacity: 1, scale: 1 }}
-              transition={{ type: "spring", stiffness: 300, damping: 20 }}
+              transition={{ duration: 0.3, ease: EASE_EXPO }}
             >
-              <Badge
-                variant={
-                  chem === "Benzene" || chem.includes("Talc")
-                    ? "critical"
-                    : chem === "Formaldehyde"
-                      ? "high"
-                      : "moderate"
-                }
-                className="text-xs"
-              >
-                {chem}
+              <Badge variant={variant} className="text-xs">
+                {name}
               </Badge>
             </motion.div>
           ))}
         </AnimatePresence>
       </div>
-
-      <p className="text-xs text-muted-foreground mt-6">
-        Scanning {transactions.reduce((sum, t) => sum + t.products.length, 0)} products across {transactions.length} orders
-      </p>
     </motion.div>
   );
 }

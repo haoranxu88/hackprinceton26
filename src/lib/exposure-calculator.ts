@@ -80,10 +80,10 @@ export function getRiskLevel(score: number): "safe" | "moderate" | "high" | "cri
 
 export function getRiskColor(level: string): string {
   switch (level) {
-    case "safe": return "hsl(142, 72%, 42%)";
-    case "moderate": return "hsl(45, 93%, 52%)";
-    case "high": return "hsl(24, 94%, 53%)";
-    case "critical": return "hsl(0, 84%, 60%)";
-    default: return "hsl(210, 10%, 45%)";
+    case "safe": return "hsl(145, 58%, 36%)";
+    case "moderate": return "hsl(41, 78%, 48%)";
+    case "high": return "hsl(24, 88%, 50%)";
+    case "critical": return "hsl(0, 72%, 50%)";
+    default: return "hsl(148, 5%, 42%)";
   }
 }

@@ -1,10 +1,8 @@
 import { useState } from "react";
-import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
 import type { ClinicalTrial } from "@/data/mock-trials";
-import { Microscope, MapPin, ChevronDown, ChevronUp, Heart } from "lucide-react";
+import { Heart, ChevronDown, ChevronUp, MapPin } from "lucide-react";
 
 interface TrialCardProps {
   trial: ClinicalTrial;
@@ -14,88 +12,83 @@ export function TrialCard({ trial }: TrialCardProps) {
   const [expanded, setExpanded] = useState(false);
 
   return (
-    <Card className="overflow-hidden hover:shadow-elegant transition-all duration-300 border-primary/10">
-      <CardHeader className="p-4 pb-3">
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex items-start gap-3 min-w-0">
-            <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
-              <Microscope className="w-5 h-5 text-primary" />
-            </div>
-            <div className="min-w-0">
-              <CardTitle className="text-sm leading-tight">{trial.title}</CardTitle>
-              <p className="text-xs text-muted-foreground mt-0.5">{trial.sponsor}</p>
-            </div>
+    <div className="py-6">
+      <div className="flex items-start justify-between gap-6">
+        {/* Left: main info */}
+        <div className="flex-1 min-w-0">
+          <div className="flex flex-wrap items-baseline gap-3 mb-2">
+            <span className="font-display font-bold text-xl text-foreground leading-none">
+              {trial.phase}
+            </span>
+            <Badge
+              variant={trial.status === "recruiting" ? "default" : "secondary"}
+              className="text-[10px]"
+            >
+              {trial.status}
+            </Badge>
+            <span className="text-xs text-muted-foreground">
+              {trial.eligibilityMatch}% eligibility match
+            </span>
           </div>
-          <Badge
-            variant={trial.status === "recruiting" ? "default" : "secondary"}
-            className="shrink-0 text-[10px]"
+
+          <p className="font-semibold text-foreground text-sm mb-0.5">{trial.title}</p>
+          <p className="text-sm text-muted-foreground mb-3">
+            {trial.sponsor} &middot; {trial.condition}
+          </p>
+
+          <div className="flex flex-wrap gap-1.5">
+            {trial.linkedChemicals.map((c) => (
+              <Badge key={c} variant="high" className="text-[10px]">
+                {c} exposure
+              </Badge>
+            ))}
+            <Badge variant="outline" className="text-[10px] text-muted-foreground">
+              {trial.molecule.split(" ")[0]}
+            </Badge>
+          </div>
+        </div>
+
+        {/* Right: actions */}
+        <div className="flex flex-col items-end gap-3 shrink-0">
+          <Button size="sm" variant="outline" className="gap-1.5 text-xs font-semibold">
+            <Heart className="w-3 h-3" />
+            Express Interest
+          </Button>
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground hover:no-underline transition-colors flex items-center gap-1"
           >
-            {trial.status}
-          </Badge>
+            {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+            {expanded ? "Hide" : "Details"}
+          </button>
         </div>
-      </CardHeader>
+      </div>
 
-      <CardContent className="px-4 pb-3 space-y-3">
-        <div className="grid grid-cols-3 gap-2 text-center">
-          <div className="p-2 rounded-lg bg-muted/50">
-            <p className="text-xs text-muted-foreground">Phase</p>
-            <p className="text-sm font-bold text-foreground">{trial.phase}</p>
-          </div>
-          <div className="p-2 rounded-lg bg-muted/50">
-            <p className="text-xs text-muted-foreground">Match</p>
-            <p className="text-sm font-bold text-primary">{trial.eligibilityMatch}%</p>
-          </div>
-          <div className="p-2 rounded-lg bg-muted/50">
-            <p className="text-xs text-muted-foreground">Molecule</p>
-            <p className="text-xs font-bold text-foreground truncate">{trial.molecule.split(" ")[0]}</p>
-          </div>
-        </div>
+      {/* Expanded */}
+      {expanded && (
+        <div className="mt-5 pt-5 border-t border-border space-y-4">
+          <p className="text-sm text-muted-foreground leading-relaxed">{trial.description}</p>
 
-        <div className="flex flex-wrap gap-1">
-          {trial.linkedChemicals.map((c) => (
-            <Badge key={c} variant="high" className="text-[10px]">{c} exposure</Badge>
-          ))}
-          <Badge variant="outline" className="text-[10px] text-foreground">{trial.condition}</Badge>
-        </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <MapPin className="w-3 h-3 text-muted-foreground shrink-0" />
+            {trial.locations.map((loc) => (
+              <Badge key={loc} variant="secondary" className="text-[10px]">
+                {loc}
+              </Badge>
+            ))}
+          </div>
 
-        {expanded && (
-          <>
-            <Separator />
-            <p className="text-xs text-muted-foreground leading-relaxed">{trial.description}</p>
-            <div className="space-y-1">
-              <p className="text-xs font-semibold text-foreground flex items-center gap-1">
-                <MapPin className="w-3 h-3" /> Locations
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">
+                Compensation
               </p>
-              <div className="flex flex-wrap gap-1">
-                {trial.locations.map((loc) => (
-                  <Badge key={loc} variant="secondary" className="text-[10px]">{loc}</Badge>
-                ))}
-              </div>
+              <p className="text-sm text-foreground">{trial.compensation}</p>
             </div>
-            <div className="p-2 rounded-lg bg-primary/5 text-xs">
-              <p className="font-medium text-foreground">Compensation</p>
-              <p className="text-muted-foreground">{trial.compensation}</p>
-            </div>
-            <p className="text-[10px] text-muted-foreground">NCT ID: {trial.nctId}</p>
-          </>
-        )}
-      </CardContent>
-
-      <CardFooter className="px-4 pb-4 gap-2">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => setExpanded(!expanded)}
-          className="text-xs gap-1"
-        >
-          {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-          {expanded ? "Less" : "Details"}
-        </Button>
-        <Button variant="hero" size="sm" className="ml-auto gap-1 text-xs">
-          <Heart className="w-3 h-3" />
-          Express Interest
-        </Button>
-      </CardFooter>
-    </Card>
+            <p className="text-[10px] text-muted-foreground font-mono">{trial.nctId}</p>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
