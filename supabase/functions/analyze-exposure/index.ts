@@ -22,7 +22,7 @@ Deno.serve(async (req) => {
       );
     }
 
-    console.log(`Analyzing ${products.length} products for chemical exposure`);
+    console.log(`Analyzing ${products.length} products. API key: ${geminiKey.slice(0, 10)}...`);
 
     const productList = products
       .map((p: { name: string; description: string }, i: number) =>
@@ -30,44 +30,17 @@ Deno.serve(async (req) => {
       )
       .join("\n");
 
-    const prompt = `You are an EPA toxicology expert analyzing consumer products for hazardous chemical exposure.
+    const prompt = `You are an EPA toxicology expert. Analyze these consumer products for hazardous chemicals.
 
-For each product below, identify any hazardous chemicals it likely contains based on known ingredient databases (CPDat, Open Food Facts, EWG).
-
-Products to analyze:
+Products:
 ${productList}
 
-Return a JSON object with this exact structure:
-{
-  "overallScore": <number 0-100, overall toxic load score>,
-  "percentile": <number, estimated population percentile>,
-  "riskLevel": "<safe|moderate|high|critical>",
-  "totalProductsScanned": ${products.length},
-  "flaggedProducts": <number of products containing hazardous chemicals>,
-  "chemicals": [
-    {
-      "chemical": "<chemical name>",
-      "casNumber": "<CAS number>",
-      "category": "<carcinogen|endocrine_disruptor|irritant|neurotoxin>",
-      "exposureRoute": "<dermal|inhalation|ingestion>",
-      "concentrationPpm": <estimated concentration in ppm>,
-      "kp": <permeability coefficient cm/hr>,
-      "contactTimeHrs": <typical contact time>,
-      "frequency": <estimated uses per month based on product type>,
-      "riskLevel": "<safe|moderate|high|critical>",
-      "products": [<list of product names containing this chemical>],
-      "healthEffects": [<list of health effects>]
-    }
-  ]
-}
+Return ONLY valid JSON (no markdown, no code fences):
+{"overallScore":<0-100>,"percentile":<number>,"riskLevel":"<safe|moderate|high|critical>","totalProductsScanned":${products.length},"flaggedProducts":<number>,"chemicals":[{"chemical":"<name>","casNumber":"<CAS>","category":"<carcinogen|endocrine_disruptor|irritant|neurotoxin>","exposureRoute":"<dermal|inhalation|ingestion>","concentrationPpm":<number>,"kp":<number>,"contactTimeHrs":<number>,"frequency":<number>,"riskLevel":"<safe|moderate|high|critical>","products":["<product names>"],"healthEffects":["<effects>"]}]}
 
-Be scientifically accurate. Focus on chemicals with documented health risks like benzene, formaldehyde, talc, parabens, phthalates, PFAS, oxybenzone, aluminum compounds. Only return valid JSON, no markdown fences or other text.`;
+Focus on benzene, formaldehyde, talc, parabens, phthalates, PFAS, oxybenzone, aluminum.`;
 
-    // Use x-goog-api-key header per official Gemini REST docs
     const geminiUrl = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
-
-    console.log("Calling Gemini at:", geminiUrl);
-    console.log("API key starts with:", geminiKey.slice(0, 10) + "...");
 
     const geminiResponse = await fetch(geminiUrl, {
       method: "POST",
@@ -86,12 +59,15 @@ Be scientifically accurate. Focus on chemicals with documented health risks like
 
     const responseText = await geminiResponse.text();
     console.log("Gemini status:", geminiResponse.status);
-    console.log("Gemini response preview:", responseText.slice(0, 300));
 
     if (!geminiResponse.ok) {
-      console.error("Gemini API error full:", responseText);
+      console.error("Gemini error:", responseText.slice(0, 500));
       return new Response(
-        JSON.stringify({ error: `Gemini API ${geminiResponse.status}`, details: responseText.slice(0, 500) }),
+        JSON.stringify({ 
+          error: `Gemini API returned ${geminiResponse.status}`, 
+          gemini_error: responseText.slice(0, 500),
+          key_prefix: geminiKey.slice(0, 10)
+        }),
         { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -100,23 +76,21 @@ Be scientifically accurate. Focus on chemicals with documented health risks like
     const textContent = geminiData.candidates?.[0]?.content?.parts?.[0]?.text;
 
     if (!textContent) {
-      console.error("No content in Gemini response:", JSON.stringify(geminiData).slice(0, 300));
       return new Response(
-        JSON.stringify({ error: "No content in Gemini response", details: JSON.stringify(geminiData).slice(0, 300) }),
+        JSON.stringify({ error: "Empty Gemini response", raw: JSON.stringify(geminiData).slice(0, 300) }),
         { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    // Strip markdown code fences if present
     const cleanJson = textContent.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
     const analysis = JSON.parse(cleanJson);
-    console.log("Analysis complete. Score:", analysis.overallScore, "Chemicals:", analysis.chemicals?.length);
+    console.log("Success! Score:", analysis.overallScore);
 
     return new Response(JSON.stringify(analysis), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (error) {
-    console.error("analyze-exposure error:", error.message, error.stack);
+    console.error("analyze-exposure crash:", error.message);
     return new Response(
       JSON.stringify({ error: error.message }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }

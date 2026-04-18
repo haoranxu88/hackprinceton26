@@ -19,7 +19,6 @@ Deno.serve(async (req) => {
     KNOT_SECRET: knotSecret ? `${knotSecret.slice(0, 8)}...${knotSecret.slice(-4)} (${knotSecret.length} chars)` : "NOT SET",
   };
 
-  // Quick test: try calling Gemini with a tiny prompt
   if (geminiKey) {
     try {
       const resp = await fetch(
@@ -37,7 +36,7 @@ Deno.serve(async (req) => {
       );
       const text = await resp.text();
       result.gemini_status = resp.status;
-      result.gemini_response = text.slice(0, 300);
+      result.gemini_response = text.slice(0, 500);
     } catch (e) {
       result.gemini_error = e.message;
     }
