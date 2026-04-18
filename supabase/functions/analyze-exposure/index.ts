@@ -63,44 +63,50 @@ Return a JSON object with this exact structure:
 
 Be scientifically accurate. Focus on chemicals with documented health risks like benzene, formaldehyde, talc, parabens, phthalates, PFAS, oxybenzone, aluminum compounds. Only return the JSON, no other text.`;
 
-    const geminiResponse = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: {
-            temperature: 0.2,
-            maxOutputTokens: 4096,
-            responseMimeType: "application/json",
-          },
-        }),
-      }
-    );
+    console.log("Calling Gemini API...");
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`;
+
+    const geminiResponse = await fetch(geminiUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: {
+          temperature: 0.2,
+          maxOutputTokens: 4096,
+        },
+      }),
+    });
+
+    const responseText = await geminiResponse.text();
+    console.log("Gemini status:", geminiResponse.status);
+    console.log("Gemini response:", responseText.slice(0, 500));
 
     if (!geminiResponse.ok) {
-      const errText = await geminiResponse.text();
-      console.error("Gemini API error:", errText);
-      throw new Error(`Gemini API error: ${geminiResponse.status}`);
+      console.error("Gemini API error:", responseText);
+      throw new Error(`Gemini API error: ${geminiResponse.status} - ${responseText.slice(0, 200)}`);
     }
 
-    const geminiData = await geminiResponse.json();
+    const geminiData = JSON.parse(responseText);
     const textContent = geminiData.candidates?.[0]?.content?.parts?.[0]?.text;
 
     if (!textContent) {
+      console.error("No content in Gemini response:", JSON.stringify(geminiData).slice(0, 300));
       throw new Error("No content in Gemini response");
     }
 
-    // Parse the JSON from Gemini's response
-    const analysis = JSON.parse(textContent);
-    console.log("Analysis complete. Score:", analysis.overallScore, "Chemicals found:", analysis.chemicals?.length);
+    // Strip markdown code fences if present
+    const cleanJson = textContent.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+    console.log("Parsing JSON:", cleanJson.slice(0, 200));
+
+    const analysis = JSON.parse(cleanJson);
+    console.log("Analysis complete. Score:", analysis.overallScore, "Chemicals:", analysis.chemicals?.length);
 
     return new Response(JSON.stringify(analysis), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (error) {
-    console.error("analyze-exposure error:", error);
+    console.error("analyze-exposure error:", error.message);
     return new Response(
       JSON.stringify({ error: error.message }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }

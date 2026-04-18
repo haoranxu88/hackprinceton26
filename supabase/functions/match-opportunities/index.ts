@@ -22,7 +22,7 @@ Deno.serve(async (req) => {
       );
     }
 
-    console.log(`Matching opportunities for chemicals:`, chemicals);
+    console.log("Matching opportunities for chemicals:", chemicals);
 
     const prompt = `You are a legal and clinical trial matching expert. Given the following list of hazardous chemicals a consumer has been exposed to through retail products, find matching class action lawsuits and clinical trials.
 
@@ -66,49 +66,48 @@ Return a JSON object with this exact structure:
   ]
 }
 
-Focus on:
-- Real, well-known class action lawsuits (benzene in dry shampoo, talc/J&J, sunscreen recalls, etc.)
-- Regeneron clinical trials where possible (Linvoseltamab for Multiple Myeloma, Ubamatamab for Ovarian Cancer, Dupixent for Eczema)
-- Be factually accurate about settlement amounts and trial phases
-- Only return the JSON, no other text.`;
+Focus on real, well-known class action lawsuits and Regeneron clinical trials where possible. Only return the JSON, no other text.`;
 
-    const geminiResponse = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: {
-            temperature: 0.3,
-            maxOutputTokens: 4096,
-            responseMimeType: "application/json",
-          },
-        }),
-      }
-    );
+    console.log("Calling Gemini API for opportunity matching...");
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`;
+
+    const geminiResponse = await fetch(geminiUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: {
+          temperature: 0.3,
+          maxOutputTokens: 4096,
+        },
+      }),
+    });
+
+    const responseText = await geminiResponse.text();
+    console.log("Gemini status:", geminiResponse.status);
+    console.log("Gemini response:", responseText.slice(0, 500));
 
     if (!geminiResponse.ok) {
-      const errText = await geminiResponse.text();
-      console.error("Gemini API error:", errText);
+      console.error("Gemini API error:", responseText);
       throw new Error(`Gemini API error: ${geminiResponse.status}`);
     }
 
-    const geminiData = await geminiResponse.json();
+    const geminiData = JSON.parse(responseText);
     const textContent = geminiData.candidates?.[0]?.content?.parts?.[0]?.text;
 
     if (!textContent) {
       throw new Error("No content in Gemini response");
     }
 
-    const opportunities = JSON.parse(textContent);
+    const cleanJson = textContent.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+    const opportunities = JSON.parse(cleanJson);
     console.log("Matching complete. Lawsuits:", opportunities.lawsuits?.length, "Trials:", opportunities.trials?.length);
 
     return new Response(JSON.stringify(opportunities), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (error) {
-    console.error("match-opportunities error:", error);
+    console.error("match-opportunities error:", error.message);
     return new Response(
       JSON.stringify({ error: error.message }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
