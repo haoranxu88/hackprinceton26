@@ -10,6 +10,7 @@ export interface Lawsuit {
   matchedProducts: string[];
   description: string;
   payoutTiers: { tier: string; amount: string; requirement: string }[];
+  claimUrl?: string;
 }
 
 export const mockLawsuits: Lawsuit[] = [
@@ -29,6 +30,7 @@ export const mockLawsuits: Lawsuit[] = [
       { tier: "Personal Injury", amount: "Up to $12,500", requirement: "Medical documentation of harm" },
       { tier: "No Proof", amount: "Up to $6.00", requirement: "Sworn statement of purchase" },
     ],
+    claimUrl: "https://www.unileverdryshampooclassaction.com",
   },
   {
     id: "law-002",
@@ -46,6 +48,7 @@ export const mockLawsuits: Lawsuit[] = [
       { tier: "Category B - Other Illness", amount: "Up to $50,000", requirement: "Medical records of related illness" },
       { tier: "Category C - Purchaser", amount: "Up to $100", requirement: "Proof of purchase" },
     ],
+    claimUrl: "https://www.officialtalcumpowdersettlement.com",
   },
   {
     id: "law-003",
@@ -66,6 +69,7 @@ export const mockLawsuits: Lawsuit[] = [
       { tier: "Injury Claim", amount: "Up to $10,000", requirement: "Medical documentation" },
       { tier: "No Receipt", amount: "Up to $4.00", requirement: "Sworn declaration" },
     ],
+    claimUrl: "https://www.sunscreenbenzeneclassaction.com",
   },
   {
     id: "law-004",
@@ -81,5 +85,6 @@ export const mockLawsuits: Lawsuit[] = [
     payoutTiers: [
       { tier: "Registration", amount: "TBD", requirement: "Register interest and document exposure" },
     ],
+    claimUrl: "https://www.hairstraightenermdl.com",
   },
 ];
