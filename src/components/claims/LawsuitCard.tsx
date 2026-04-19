@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { FileClaimDialog } from "@/components/claims/FileClaimDialog";
 import type { Lawsuit } from "@/data/mock-lawsuits";
 import { FileText, ChevronDown, ChevronUp, Clock } from "lucide-react";
 
@@ -10,6 +11,7 @@ interface LawsuitCardProps {
 
 export function LawsuitCard({ lawsuit }: LawsuitCardProps) {
   const [expanded, setExpanded] = useState(false);
+  const [dialogOpen, setDialogOpen] = useState(false);
 
   const daysUntilDeadline =
     lawsuit.deadline !== "TBD"
@@ -66,9 +68,13 @@ export function LawsuitCard({ lawsuit }: LawsuitCardProps) {
               {daysUntilDeadline > 0 ? `${daysUntilDeadline}d left` : "Deadline passed"}
             </p>
           )}
-          <Button size="sm" className="gap-1.5 text-xs font-semibold">
+          <Button
+            size="sm"
+            onClick={() => setDialogOpen(true)}
+            className="gap-1.5 text-xs font-semibold"
+          >
             <FileText className="w-3 h-3" />
-            File Claim
+            Help Me File a Claim
           </Button>
           <button
             onClick={() => setExpanded(!expanded)}
@@ -105,6 +111,12 @@ export function LawsuitCard({ lawsuit }: LawsuitCardProps) {
           </div>
         </div>
       )}
+
+      <FileClaimDialog
+        lawsuit={lawsuit}
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+      />
     </div>
   );
 }
