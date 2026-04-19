@@ -3,13 +3,15 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { FileClaimDialog } from "@/components/claims/FileClaimDialog";
 import type { Lawsuit } from "@/data/mock-lawsuits";
+import type { Transaction } from "@/data/mock-transactions";
 import { FileText, ChevronDown, ChevronUp, Clock } from "lucide-react";
 
 interface LawsuitCardProps {
   lawsuit: Lawsuit;
+  transactions?: Transaction[];
 }
 
-export function LawsuitCard({ lawsuit }: LawsuitCardProps) {
+export function LawsuitCard({ lawsuit, transactions }: LawsuitCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
 
@@ -114,6 +116,7 @@ export function LawsuitCard({ lawsuit }: LawsuitCardProps) {
 
       <FileClaimDialog
         lawsuit={lawsuit}
+        transactions={transactions}
         open={dialogOpen}
         onOpenChange={setDialogOpen}
       />

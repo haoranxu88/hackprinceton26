@@ -1,14 +1,19 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { motion } from "framer-motion";
 import { useMockToggle } from "@/hooks/useMockToggle";
 import {
   createKnotTransactionLinkSession,
+  getKnotAccounts,
   getKnotBackendStatus,
+  getKnotTransactions,
   listKnotTransactionLinkMerchants,
+  type KnotAccountRow,
+  type KnotMerchant,
+  type KnotTransactionRow,
 } from "@/lib/api";
-import { mockTransactions, type Transaction } from "@/data/mock-transactions";
+import type { Transaction } from "@/data/mock-transactions";
 import {
   ShoppingBag,
   Store,
@@ -17,43 +22,36 @@ import {
   ArrowLeft,
   Truck,
   Package2,
+  X,
 } from "lucide-react";
 
 const EASE_EXPO = [0.16, 1, 0.3, 1] as const;
 
-/** Instant demo sync user (does not need to match session userId; server falls back to demo catalog when Knot is empty). */
-const DEMO_HACKATHON_SYNC_USER = "demo-user-123";
-
 interface DisplayMerchant {
-  id: number;
-  /** Knot TransactionLink merchant id (DoorDash is 19). */
+  /** Knot TransactionLink merchant id. Stable across environments. */
   knotMerchantId: number;
   name: string;
   subtitle: string;
-  mode: "real" | "demo";
+  available: boolean;
 }
 
-interface DemoConnectedAccount {
-  merchantId: number;
-  merchantName: string;
-  connectedAt: string;
-  source: "demo";
-}
+/**
+ * pending  = SDK modal is open, user has NOT yet authenticated
+ * syncing  = AUTHENTICATED received, webhook-driven sync in flight (polling DB)
+ * connected = AUTHENTICATED received (transactions may still be arriving)
+ */
+type MerchantConnectionState = "connected" | "pending" | "syncing";
 
-interface RealConnectedAccount {
-  merchantId: number;
-  merchantName: string;
-  connectedAt: string;
-  source: "real";
-}
-
-type MerchantConnectionState = "real_connected" | "demo_connected" | "pending";
-
-const DISPLAY_MERCHANTS: DisplayMerchant[] = [
-  { id: 19, knotMerchantId: 19, name: "DoorDash", subtitle: "Live TransactionLink path", mode: "real" },
-  { id: 4, knotMerchantId: 4, name: "Amazon", subtitle: "Demo connection", mode: "demo" },
-  { id: 77, knotMerchantId: 77, name: "Uber Eats", subtitle: "Demo connection", mode: "demo" },
-  { id: 88, knotMerchantId: 88, name: "Shop Pay", subtitle: "Demo connection", mode: "demo" },
+/**
+ * Merchant IDs we surface in the UI for Knot TransactionLink on web. IDs come
+ * from GET /merchant/list?type=transaction_link&platform=web and are stable
+ * across development and production environments.
+ */
+const TARGET_MERCHANTS: Array<{ id: number; name: string; subtitle: string }> = [
+  { id: 19, name: "DoorDash", subtitle: "Food delivery history" },
+  { id: 44, name: "Amazon", subtitle: "Retail purchase history" },
+  { id: 36, name: "Uber Eats", subtitle: "Food delivery history" },
+  { id: 2125, name: "Shop Pay", subtitle: "Shopify purchase history" },
 ];
 
 const ICON_MAP: Record<string, typeof ShoppingBag> = {
@@ -63,9 +61,12 @@ const ICON_MAP: Record<string, typeof ShoppingBag> = {
   "Shop Pay": Package2,
 };
 
+type KnotCtor = new () => {
+  open: (opts: Record<string, unknown>) => void;
+};
+
 /** Load Knot Web SDK via script tag (browser cannot resolve bare knotapi-js dynamic import). */
-async function loadKnotSDK(): Promise<new () => { open: (opts: Record<string, unknown>) => void }> {
-  type KnotCtor = new () => { open: (opts: Record<string, unknown>) => void };
+async function loadKnotSDK(): Promise<KnotCtor> {
   type KnotNamespace = { default?: unknown } & Record<string, unknown>;
 
   const ns =
@@ -102,80 +103,52 @@ async function loadKnotSDK(): Promise<new () => { open: (opts: Record<string, un
   });
 }
 
-function readDemoConnectedAccounts(): DemoConnectedAccount[] {
-  try {
-    const raw = localStorage.getItem("demo-connected-accounts");
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-function writeDemoConnectedAccounts(accounts: DemoConnectedAccount[]) {
-  localStorage.setItem("demo-connected-accounts", JSON.stringify(accounts));
-}
-
-function readRealConnectedAccounts(): RealConnectedAccount[] {
-  try {
-    const raw = localStorage.getItem("knot-real-connected-accounts");
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-function writeRealConnectedAccounts(accounts: RealConnectedAccount[]) {
-  localStorage.setItem("knot-real-connected-accounts", JSON.stringify(accounts));
-}
+const KNOT_WIZARD_TRANSACTIONS_KEY = "knot-wizard-transactions";
+const KNOT_USER_ID_KEY = "knot-external-user-id";
 
 function getOrCreateKnotUserId() {
-  const existing = localStorage.getItem("knot-demo-user-id");
+  const existing = localStorage.getItem(KNOT_USER_ID_KEY);
   if (existing) return existing;
 
-  const next = `vigilant-${Date.now()}`;
-  localStorage.setItem("knot-demo-user-id", next);
+  const next = `vigilant-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  localStorage.setItem(KNOT_USER_ID_KEY, next);
   return next;
 }
 
-const KNOT_WIZARD_TRANSACTIONS_KEY = "knot-wizard-transactions";
-
-function mapKnotSyncToWizardTransactions(
-  knotTxs: unknown[],
-  merchantDisplayName: string
-): Transaction[] {
-  if (!Array.isArray(knotTxs)) return [];
-  return knotTxs.map((raw, idx) => {
-    const t = raw as Record<string, unknown>;
-    const price = (t.price as Record<string, unknown>) || {};
-    const productsRaw = Array.isArray(t.products) ? t.products : [];
-    const products = productsRaw.map((item: unknown, pIdx: number) => {
-      const p = item as Record<string, unknown>;
-      const pp = (p.price as Record<string, unknown>) || {};
-      return {
-        external_id: String(p.external_id ?? `knot-sku-${idx}-${pIdx}`),
-        name: String(p.name ?? "Item"),
-        description: String(p.description ?? ""),
-        image_url: String(p.image_url ?? ""),
-        quantity: Number(p.quantity ?? 1) || 1,
-        price: {
-          total: String(pp.total ?? "0"),
-          unit_price: String(pp.unit_price ?? pp.total ?? "0"),
-        },
-      };
-    });
+/**
+ * Normalize a DB-backed Knot transaction row into the Transaction shape the
+ * wizard downstream expects. The `raw` column preserves the original Knot
+ * payload in case we later need fields we aren't surfacing here.
+ */
+function rowToWizardTransaction(row: KnotTransactionRow): Transaction {
+  const raw = (row.raw ?? {}) as Record<string, unknown>;
+  const productsRaw = Array.isArray(row.products)
+    ? (row.products as Array<Record<string, unknown>>)
+    : Array.isArray(raw.products)
+      ? (raw.products as Array<Record<string, unknown>>)
+      : [];
+  const products = productsRaw.map((p, pIdx) => {
+    const price = (p.price as Record<string, unknown>) || {};
     return {
-      id: String(t.id ?? `knot-txn-${idx}`),
-      datetime: String(t.datetime ?? new Date().toISOString()),
-      merchant: merchantDisplayName,
-      order_status: String(t.order_status ?? "COMPLETED"),
-      products,
-      total: String(price.total ?? "0"),
+      external_id: String(p.external_id ?? `${row.id}-sku-${pIdx}`),
+      name: String(p.name ?? "Item"),
+      description: String(p.description ?? ""),
+      image_url: String(p.image_url ?? ""),
+      quantity: Number(p.quantity ?? 1) || 1,
+      price: {
+        total: String(price.total ?? "0"),
+        unit_price: String(price.unit_price ?? price.total ?? "0"),
+      },
     };
   });
+  return {
+    id: row.id,
+    datetime: row.datetime,
+    merchant: row.merchant_name ?? "Unknown",
+    order_status: row.order_status,
+    products,
+    total: row.price_total,
+  };
 }
 
 interface LinkAccountsStepProps {
@@ -186,115 +159,128 @@ interface LinkAccountsStepProps {
 export function LinkAccountsStep({ onNext, onBack }: LinkAccountsStepProps) {
   const { isMock } = useMockToggle();
   const [connectionStates, setConnectionStates] = useState<Record<number, MerchantConnectionState>>({});
+  const [txnCountByMerchant, setTxnCountByMerchant] = useState<Record<number, number>>({});
   const [status, setStatus] = useState<string>("");
   const [loadingMerchantId, setLoadingMerchantId] = useState<number | null>(null);
   const [loadingMerchants, setLoadingMerchants] = useState(false);
   const [backendReady, setBackendReady] = useState(false);
-  const [realMerchantAvailable, setRealMerchantAvailable] = useState(false);
-  const [demoFallbackMerchant, setDemoFallbackMerchant] = useState<DisplayMerchant | null>(null);
+  const [serverClientId, setServerClientId] = useState<string | null>(null);
+  const [serverEnvironment, setServerEnvironment] = useState<string>("development");
+  const [availableMerchants, setAvailableMerchants] = useState<KnotMerchant[]>([]);
 
-  const knotEnabled = import.meta.env.VITE_KNOT_ENABLED === "true";
-  const knotClientId = import.meta.env.VITE_KNOT_CLIENT_ID;
-  const knotEnvironment = import.meta.env.VITE_KNOT_ENVIRONMENT || "development";
-  const realModeEligible = !isMock && knotEnabled && Boolean(knotClientId) && backendReady && realMerchantAvailable;
+  // Ref-held so poll loops see the latest user id without re-subscribing.
+  const userIdRef = useRef<string>("");
+  const activePollsRef = useRef<Map<number, boolean>>(new Map());
 
-  useEffect(() => {
-    const demoAccounts = readDemoConnectedAccounts();
-    const realAccounts = readRealConnectedAccounts();
+  const envClientId = import.meta.env.VITE_KNOT_CLIENT_ID as string | undefined;
+  const envEnvironment = (import.meta.env.VITE_KNOT_ENVIRONMENT as string | undefined) || "development";
 
-    const next: Record<number, MerchantConnectionState> = {};
-    for (const account of demoAccounts) {
-      next[account.merchantId] = "demo_connected";
+  const clientId = serverClientId || envClientId || "";
+  const environment = serverEnvironment || envEnvironment;
+
+  const realModeEligible = !isMock && backendReady && Boolean(clientId);
+
+  const displayMerchants: DisplayMerchant[] = useMemo(() => {
+    const byId = new Map<number, KnotMerchant>();
+    for (const m of availableMerchants) {
+      if (typeof m.id === "number") byId.set(m.id, m);
     }
-    for (const account of realAccounts) {
-      next[account.merchantId] = "real_connected";
-    }
+    return TARGET_MERCHANTS.map((t) => {
+      const live = byId.get(t.id);
+      return {
+        knotMerchantId: t.id,
+        name: live?.name ? String(live.name) : t.name,
+        subtitle: t.subtitle,
+        available: Boolean(live),
+      };
+    });
+  }, [availableMerchants]);
 
-    setConnectionStates(next);
+  /**
+   * Refresh localStorage's wizard payload from the DB. Source of truth is the
+   * Knot webhook-populated table; localStorage is only a handoff to the next
+   * wizard step.
+   */
+  const persistWizardPayloadFromDb = useCallback(async (userId: string) => {
+    try {
+      const resp = await getKnotTransactions(userId, undefined, 1000);
+      const rows = resp?.transactions ?? [];
+      const mapped = rows.map(rowToWizardTransaction);
+      localStorage.setItem(KNOT_WIZARD_TRANSACTIONS_KEY, JSON.stringify(mapped));
+      return mapped.length;
+    } catch (err) {
+      console.warn("[knot-connect] persistWizardPayloadFromDb failed", err);
+      return 0;
+    }
   }, []);
 
+  /**
+   * On mount: figure out who we are to Knot, then ask the DB which merchants
+   * are already connected and how many transactions each has.
+   */
   useEffect(() => {
-    if (isMock || !knotEnabled || !knotClientId) {
+    if (isMock) {
       setBackendReady(false);
-      setRealMerchantAvailable(false);
-      console.log("[knot-connect] real_mode_eligibility", {
-        isMock,
-        knotEnabled,
-        hasClientId: Boolean(knotClientId),
-        backendReady: false,
-        realMerchantAvailable: false,
-        eligible: false,
-      });
+      setAvailableMerchants([]);
       return;
     }
 
+    const userId = getOrCreateKnotUserId();
+    userIdRef.current = userId;
+
     setLoadingMerchants(true);
-    Promise.all([getKnotBackendStatus(), listKnotTransactionLinkMerchants()])
-      .then(([backendStatus, merchantResponse]) => {
-        const nextBackendReady = Boolean(backendStatus?.ok);
-        setBackendReady(nextBackendReady);
+    Promise.all([
+      getKnotBackendStatus(),
+      listKnotTransactionLinkMerchants("web"),
+      getKnotAccounts(userId).catch((err) => {
+        console.warn("[knot-connect] get-accounts failed on mount", err);
+        return { accounts: [] as KnotAccountRow[] };
+      }),
+    ])
+      .then(([statusResp, merchantsResp, accountsResp]) => {
+        const nextReady = Boolean(statusResp?.ok);
+        setBackendReady(nextReady);
+        if (statusResp?.clientId) setServerClientId(statusResp.clientId);
+        if (statusResp?.environment) setServerEnvironment(statusResp.environment);
 
-        const merchants = Array.isArray(merchantResponse?.merchants)
-          ? merchantResponse.merchants
-          : Array.isArray(merchantResponse)
-            ? merchantResponse
-            : [];
+        const merchants = Array.isArray(merchantsResp?.merchants) ? merchantsResp.merchants : [];
+        setAvailableMerchants(merchants);
 
-        const doorDashSupported = merchants.some((merchant: { id?: number; name?: string }) => {
-          const name = (merchant.name || "").toLowerCase();
-          return merchant.id === 19 || name.includes("doordash");
-        });
+        const accounts = Array.isArray(accountsResp?.accounts) ? accountsResp.accounts : [];
+        const nextStates: Record<number, MerchantConnectionState> = {};
+        const nextCounts: Record<number, number> = {};
+        for (const acc of accounts) {
+          if (acc.connection_status === "connected") {
+            nextStates[acc.merchant_id] = "connected";
+          }
+          nextCounts[acc.merchant_id] = acc.transaction_count ?? 0;
+        }
+        setConnectionStates(nextStates);
+        setTxnCountByMerchant(nextCounts);
 
-        setRealMerchantAvailable(doorDashSupported);
-        console.log("[knot-connect] real_mode_eligibility", {
-          isMock,
-          knotEnabled,
-          hasClientId: Boolean(knotClientId),
-          backendReady: nextBackendReady,
-          realMerchantAvailable: doorDashSupported,
-          eligible: !isMock && knotEnabled && Boolean(knotClientId) && nextBackendReady && doorDashSupported,
+        // Rehydrate wizard payload from DB so Continue works immediately.
+        if (accounts.some((a) => (a.transaction_count ?? 0) > 0)) {
+          void persistWizardPayloadFromDb(userId);
+        }
+
+        console.log("[knot-connect] mount", {
+          backendReady: nextReady,
+          merchantCount: merchants.length,
+          connectedAccounts: accounts.length,
+          clientId: statusResp?.clientId,
+          environment: statusResp?.environment,
         });
       })
-      .catch(() => {
+      .catch((err) => {
+        console.error("[knot-connect] status/merchants failed", err);
         setBackendReady(false);
-        setRealMerchantAvailable(false);
-        console.log("[knot-connect] real_mode_eligibility", {
-          isMock,
-          knotEnabled,
-          hasClientId: Boolean(knotClientId),
-          backendReady: false,
-          realMerchantAvailable: false,
-          eligible: false,
-        });
+        setAvailableMerchants([]);
       })
       .finally(() => setLoadingMerchants(false));
-  }, [isMock, knotClientId, knotEnabled]);
+  }, [isMock, persistWizardPayloadFromDb]);
 
   const setMerchantConnectionState = (merchantId: number, state: MerchantConnectionState) => {
     setConnectionStates((prev) => ({ ...prev, [merchantId]: state }));
-  };
-
-  const markMerchantConnected = (m: DisplayMerchant) => {
-    const existingReal = readRealConnectedAccounts();
-    writeRealConnectedAccounts([
-      {
-        merchantId: m.id,
-        merchantName: m.name,
-        connectedAt: new Date().toISOString(),
-        source: "real",
-      },
-      ...existingReal.filter((account) => account.merchantId !== m.id),
-    ]);
-    setMerchantConnectionState(m.id, "real_connected");
-    setLoadingMerchantId(null);
-    setStatus(
-      `${m.name} connected via Knot TransactionLink. Continue to analyze with demo purchase data.`
-    );
-  };
-
-  const openDemoFallback = (merchant: DisplayMerchant, reason?: string) => {
-    if (reason) setStatus(reason);
-    setDemoFallbackMerchant(merchant);
   };
 
   const clearMerchantConnectionState = (merchantId: number) => {
@@ -305,216 +291,332 @@ export function LinkAccountsStep({ onNext, onBack }: LinkAccountsStepProps) {
     });
   };
 
-  const showRealModeUnavailable = (merchant: DisplayMerchant, reason: string) => {
-    clearMerchantConnectionState(merchant.id);
+  /**
+   * Poll getKnotTransactions every 2s for up to 60s, waiting for the webhook
+   * to land transactions in the DB. Shows live counts and stops early when
+   * two consecutive polls return the same non-zero count (i.e. sync settled).
+   */
+  const pollForTransactions = useCallback(
+    async (merchant: DisplayMerchant, userId: string) => {
+      const mid = merchant.knotMerchantId;
+      if (activePollsRef.current.get(mid)) return;
+      activePollsRef.current.set(mid, true);
+
+      const intervalMs = 2000;
+      const maxElapsedMs = 60_000;
+      const started = Date.now();
+      let lastCount = -1;
+      let stableHits = 0;
+
+      try {
+        while (Date.now() - started < maxElapsedMs) {
+          let count = 0;
+          try {
+            const resp = await getKnotTransactions(userId, mid, 500);
+            count = resp?.count ?? resp?.transactions?.length ?? 0;
+          } catch (err) {
+            console.warn("[knot-connect] get-transactions poll failed", err);
+          }
+
+          setTxnCountByMerchant((prev) => ({ ...prev, [mid]: count }));
+
+          if (count > 0) {
+            setMerchantConnectionState(mid, "connected");
+            setStatus(
+              `${merchant.name} connected. Synced ${count} transaction${count === 1 ? "" : "s"} so far...`
+            );
+            // Refresh wizard payload so Continue button has current data.
+            await persistWizardPayloadFromDb(userId);
+          }
+
+          // Early-exit once the count has been non-zero and stable twice in a row.
+          if (count > 0 && count === lastCount) {
+            stableHits++;
+            if (stableHits >= 2) {
+              setStatus(
+                `${merchant.name} connected. Synced ${count} transaction${count === 1 ? "" : "s"}.`
+              );
+              break;
+            }
+          } else if (count !== lastCount) {
+            stableHits = 0;
+          }
+          lastCount = count;
+
+          await new Promise((r) => setTimeout(r, intervalMs));
+        }
+
+        if (lastCount <= 0) {
+          setStatus(
+            `${merchant.name} authenticated. Knot is still pulling your history — this can take a minute for large accounts. Leave this page open or come back later; Continue will work as soon as transactions arrive.`
+          );
+        }
+      } finally {
+        activePollsRef.current.delete(mid);
+      }
+    },
+    [persistWizardPayloadFromDb]
+  );
+
+  const handleSyncAfterAuth = useCallback(
+    (merchant: DisplayMerchant, userId: string) => {
+      setMerchantConnectionState(merchant.knotMerchantId, "syncing");
+      setStatus(
+        `${merchant.name} authenticated. Waiting for transactions to arrive via webhook...`
+      );
+      // Don't await — let polling run in background so the UI remains responsive.
+      void pollForTransactions(merchant, userId);
+    },
+    [pollForTransactions]
+  );
+
+  const handleCancelPending = (merchantId: number, merchantName: string) => {
+    console.log("[knot-connect] user_cancelled_pending", { merchantId, merchantName });
+    clearMerchantConnectionState(merchantId);
     setLoadingMerchantId(null);
-    setStatus(`Knot unavailable for ${merchant.name}: ${reason}`);
-  };
-
-  const handleConfirmDemoFallback = () => {
-    if (!demoFallbackMerchant) return;
-
-    const existing = readDemoConnectedAccounts();
-    const next = [
-      {
-        merchantId: demoFallbackMerchant.id,
-        merchantName: demoFallbackMerchant.name,
-        connectedAt: new Date().toISOString(),
-        source: "demo" as const,
-      },
-      ...existing.filter((account) => account.merchantId !== demoFallbackMerchant.id),
-    ];
-
-    writeDemoConnectedAccounts(next);
-    setMerchantConnectionState(demoFallbackMerchant.id, "demo_connected");
-    setStatus(`${demoFallbackMerchant.name} connected in demo mode.`);
-    setDemoFallbackMerchant(null);
+    setStatus(
+      `Cancelled connection attempt for ${merchantName}. The Knot modal may still be open in the background — close it or refresh the page.`
+    );
   };
 
   const handleLinkMerchant = async (merchant: DisplayMerchant) => {
     console.log("[knot-connect] button_click", {
-      merchantId: merchant.id,
+      merchantId: merchant.knotMerchantId,
       merchantName: merchant.name,
-      mode: merchant.mode,
-    });
-
-    console.log("[knot-connect] real_mode_eligibility_result", {
-      merchantId: merchant.id,
-      merchantName: merchant.name,
-      isMock,
-      knotEnabled,
-      hasClientId: Boolean(knotClientId),
-      backendReady,
-      realMerchantAvailable,
       realModeEligible,
+      backendReady,
+      available: merchant.available,
     });
 
-    if (merchant.mode === "demo") {
-      openDemoFallback(
-        merchant,
-        `${merchant.name} is demo-only in this build.`
+    if (!realModeEligible) {
+      const reason = isMock
+        ? "turn off mock mode to connect real accounts"
+        : !backendReady
+          ? "Knot credentials are not configured on the edge function"
+          : !clientId
+            ? "no Knot client_id available from the backend"
+            : "Knot is not available right now";
+      setStatus(`Cannot connect ${merchant.name}: ${reason}`);
+      return;
+    }
+
+    if (!merchant.available) {
+      setStatus(
+        `${merchant.name} (id ${merchant.knotMerchantId}) is not currently available on web. Try again later.`
       );
       return;
     }
 
-    if (!realModeEligible) {
-      const reason = isMock
-        ? "mock mode is enabled"
-        : !knotEnabled
-          ? "VITE_KNOT_ENABLED is not set to true"
-          : !knotClientId
-            ? "VITE_KNOT_CLIENT_ID is missing"
-            : !backendReady
-              ? "backend session route is unavailable"
-              : !realMerchantAvailable
-                ? "DoorDash is not available from the Knot merchant list"
-                : "real mode is not eligible";
-      showRealModeUnavailable(merchant, reason);
-      return;
-    }
-
     try {
-      setMerchantConnectionState(merchant.id, "pending");
-      setLoadingMerchantId(merchant.id);
+      setMerchantConnectionState(merchant.knotMerchantId, "pending");
+      setLoadingMerchantId(merchant.knotMerchantId);
       setStatus(`Creating Knot session for ${merchant.name}...`);
+
       const userId = getOrCreateKnotUserId();
-
-      console.log("[knot-connect] backend_session_request_start", {
-        merchantId: merchant.id,
-        merchantName: merchant.name,
-        userId,
-      });
+      userIdRef.current = userId;
       const sessionResponse = await createKnotTransactionLinkSession(userId);
-      console.log("[knot-connect] backend_session_request_success", {
-        merchantId: merchant.id,
-        merchantName: merchant.name,
-        userId,
+
+      if (!sessionResponse?.sessionId) {
+        throw new Error("No sessionId returned from create-session");
+      }
+
+      console.log("[knot-connect] session created", {
         sessionId: sessionResponse.sessionId,
+        environment: sessionResponse.environment,
+        externalUserId: sessionResponse.externalUserId,
       });
 
-      let linkSucceeded = false;
+      const KnotapiJS = await loadKnotSDK();
+      const knot = new KnotapiJS();
 
-      try {
-        const txRes = await fetch(`${import.meta.env.VITE_API_URL}/api/knot/transactions`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            merchantId: merchant.id,
-            externalUserId: DEMO_HACKATHON_SYNC_USER,
-          }),
-        });
-        const txData = await txRes.json();
-        console.log("[knot-connect] transactions synced", txData);
-        if (txRes.ok && Array.isArray(txData.transactions) && txData.transactions.length > 0) {
-          const raw = txData.transactions as unknown[];
-          const first = raw[0] as Record<string, unknown> | undefined;
-          const txs =
-            first && Array.isArray(first.products)
-              ? (raw as Transaction[])
-              : mapKnotSyncToWizardTransactions(raw, merchant.name);
-          localStorage.setItem(KNOT_WIZARD_TRANSACTIONS_KEY, JSON.stringify(txs));
-          markMerchantConnected(merchant);
-          linkSucceeded = true;
-        }
-      } catch (e) {
-        console.log("[knot-connect] sync failed, continuing anyway", e);
-      }
+      setStatus(`Opening Knot for ${merchant.name}. Complete the login in the Knot modal.`);
 
-      console.log("[knot-connect] sdk_script_load_start", {
-        merchantId: merchant.id,
-        merchantName: merchant.name,
-      });
-      let knot;
-      try {
-        const KnotapiJS = await loadKnotSDK();
-        console.log("[knot-connect] sdk_script_load_success", {
-          merchantId: merchant.id,
-          merchantName: merchant.name,
-        });
-        knot = new KnotapiJS();
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "Failed to load knotapi-js";
-        console.log("[knot-connect] sdk_script_load_failure", {
-          merchantId: merchant.id,
-          merchantName: merchant.name,
-          message,
-        });
-        throw new Error(message);
-      }
+      /**
+       * AUTHENTICATED (via onEvent) is the real success signal per Knot docs:
+       * "AUTHENTICATED — merchant account successfully linked". Once we see it,
+       * we start polling the DB for webhook-delivered transactions. We no
+       * longer trust onSuccess alone.
+       */
+      let authenticatedForMerchant = false;
+      let syncStarted = false;
 
-      console.log("[knot-connect] sdk_open_start", {
-        merchantId: merchant.id,
-        merchantName: merchant.name,
-        knotMerchantId: merchant.knotMerchantId,
-      });
+      const startSyncOnce = () => {
+        if (syncStarted) return;
+        syncStarted = true;
+        handleSyncAfterAuth(merchant, sessionResponse.externalUserId || userId);
+        setLoadingMerchantId(null);
+      };
 
       knot.open({
         sessionId: sessionResponse.sessionId,
-        clientId: sessionResponse.clientId || knotClientId,
-        environment: sessionResponse.environment || knotEnvironment,
-        // DoorDash knot merchant id is 19
+        clientId: sessionResponse.clientId || clientId,
+        environment: sessionResponse.environment || environment,
         merchantIds: [merchant.knotMerchantId],
         entryPoint: "onboarding",
         useCategories: true,
         useSearch: true,
-        onSuccess: (details: unknown) => {
-          console.log("[knot-connect] onSuccess", details);
-          linkSucceeded = true;
-          markMerchantConnected(merchant);
+        onSuccess: (...args: unknown[]) => {
+          console.log("[knot-connect] onSuccess raw_args", args);
+          // v1.1.1 passes a single object; older builds pass positional args.
+          // Either way, treat onSuccess as a secondary signal — AUTHENTICATED
+          // via onEvent is the real source of truth.
+          if (authenticatedForMerchant) {
+            startSyncOnce();
+          } else {
+            console.warn(
+              "[knot-connect] onSuccess fired without prior AUTHENTICATED event — not marking connected",
+              { merchant: merchant.name, args }
+            );
+            setStatus(
+              `Knot reported success for ${merchant.name} but no AUTHENTICATED event arrived. Try again.`
+            );
+          }
         },
-        onEvent: (event: string, merchantId: number) => {
-          console.log("[knot-connect] onEvent", { event, merchantId });
+        onEvent: (...args: unknown[]) => {
+          console.log("[knot-connect] onEvent raw_args", args);
+          // The Web SDK signature has shifted across versions:
+          //   v1.1.x: onEvent(eventObj)  where eventObj = { event, merchant, merchantId, taskId, metaData, ... }
+          //   v1.0.x: onEvent(event, merchant, merchantId, payload, taskId)
+          //   older:  onEvent(event, merchantId)
+          // Normalise into { event, merchantId } regardless of which one we got.
+          let event = "";
+          let eventMerchantId: number | null = null;
+
+          const first = args[0];
+          if (first && typeof first === "object") {
+            const obj = first as Record<string, unknown>;
+            const name =
+              (typeof obj.event === "string" && obj.event) ||
+              (typeof obj.name === "string" && obj.name) ||
+              "";
+            event = name;
+            const midRaw =
+              obj.merchantId ?? obj.merchant_id ?? obj.merchantID ?? null;
+            if (typeof midRaw === "number") {
+              eventMerchantId = midRaw;
+            } else if (typeof midRaw === "string" && /^\d+$/.test(midRaw)) {
+              eventMerchantId = Number(midRaw);
+            }
+          } else if (typeof first === "string") {
+            event = first;
+            const midAt2 = typeof args[2] === "number" ? (args[2] as number) : null;
+            const midAt1 = typeof args[1] === "number" ? (args[1] as number) : null;
+            eventMerchantId = midAt2 ?? midAt1;
+          }
+
           if (event === "LOGIN_STARTED") {
-            setStatus(`Connecting ${merchant.name}...`);
+            setStatus(`Logging into ${merchant.name}...`);
           } else if (event === "AUTHENTICATED") {
-            setStatus(`${merchant.name} authenticated. Finalizing connection...`);
+            if (
+              eventMerchantId === null ||
+              eventMerchantId === merchant.knotMerchantId
+            ) {
+              authenticatedForMerchant = true;
+              setStatus(`${merchant.name} authenticated. Fetching transactions...`);
+              startSyncOnce();
+            } else {
+              console.warn(
+                "[knot-connect] AUTHENTICATED for unexpected merchant id",
+                { expected: merchant.knotMerchantId, got: eventMerchantId }
+              );
+            }
           } else if (event === "OTP_REQUIRED" || event === "QUESTIONS_REQUIRED") {
             setStatus(`Additional verification required for ${merchant.name}.`);
+          } else if (event === "MERCHANT_CLICKED") {
+            setStatus(`Preparing ${merchant.name} login...`);
           }
         },
-        onExit: (merchantId: number, completed: boolean) => {
-          console.log("[knot-connect] onExit", { merchantId, completed });
-          setLoadingMerchantId(null);
-          if (!completed && !linkSucceeded) {
-            clearMerchantConnectionState(merchant.id);
-            setStatus(`Knot flow closed for ${merchant.name}. Retry to continue with the real login flow.`);
+        onExit: (...args: unknown[]) => {
+          console.log("[knot-connect] onExit raw_args", args);
+          if (!authenticatedForMerchant) {
+            clearMerchantConnectionState(merchant.knotMerchantId);
+            setLoadingMerchantId(null);
+            setStatus(
+              `Knot closed before ${merchant.name} was authenticated. Click Connect to try again.`
+            );
           }
         },
-        onError: (errorCode: string, message: string) => {
-          console.log("[knot-connect] onError", { errorCode, message });
-          clearMerchantConnectionState(merchant.id);
+        onError: (...errArgs: unknown[]) => {
+          console.error("[knot-connect] onError raw_args", errArgs);
+          clearMerchantConnectionState(merchant.knotMerchantId);
           setLoadingMerchantId(null);
-          setStatus(`Knot unavailable for ${merchant.name}: ${message || errorCode || "Unable to initialize TransactionLink"}`);
+
+          // Knot occasionally passes an object as errorCode instead of a string.
+          // Normalise both args into a readable description.
+          const rawCode = errArgs[0];
+          const rawMsg = errArgs[1];
+          const describe = (v: unknown): string => {
+            if (v == null) return "";
+            if (typeof v === "string") return v;
+            if (v instanceof Error) return v.message;
+            if (typeof v === "object") {
+              const anyV = v as Record<string, unknown>;
+              const candidate =
+                anyV.message ?? anyV.error ?? anyV.code ?? anyV.type ?? null;
+              if (typeof candidate === "string") return candidate;
+              try {
+                return JSON.stringify(v);
+              } catch {
+                return String(v);
+              }
+            }
+            return String(v);
+          };
+          const codeStr = describe(rawCode);
+          const msgStr = describe(rawMsg);
+          const combined = [codeStr, msgStr].filter(Boolean).join(" — ");
+
+          const isChunkLoadError =
+            /failed to fetch dynamically imported module|loading chunk|assets\//i.test(
+              combined
+            );
+
+          if (isChunkLoadError) {
+            setStatus(
+              `Knot SDK failed to load (${combined || "chunk error"}). Try: hard refresh (Ctrl+Shift+R), disable ad-blockers for the Knot CDN, or retry in a moment.`
+            );
+          } else {
+            setStatus(
+              `${merchant.name} error: ${
+                combined || "Unable to initialize TransactionLink"
+              }`
+            );
+          }
         },
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to start Knot";
-      console.log("[knot-connect] backend_session_request_failure", {
-        merchantId: merchant.id,
-        merchantName: merchant.name,
-        message,
-      });
-      clearMerchantConnectionState(merchant.id);
+      console.error("[knot-connect] link failure", error);
+      clearMerchantConnectionState(merchant.knotMerchantId);
       setLoadingMerchantId(null);
       setStatus(`Knot unavailable for ${merchant.name}: ${message}`);
     }
   };
 
-  const handleProceed = () => {
+  const totalRealTransactions = Object.values(txnCountByMerchant).reduce(
+    (a, b) => a + (b ?? 0),
+    0
+  );
+
+  const handleProceed = async () => {
+    const userId = userIdRef.current || getOrCreateKnotUserId();
     try {
-      const raw = localStorage.getItem(KNOT_WIZARD_TRANSACTIONS_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw) as unknown;
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          onNext(parsed as Transaction[]);
-          return;
-        }
+      const count = await persistWizardPayloadFromDb(userId);
+      if (count > 0) {
+        const raw = localStorage.getItem(KNOT_WIZARD_TRANSACTIONS_KEY);
+        const parsed = raw ? (JSON.parse(raw) as Transaction[]) : [];
+        onNext(parsed);
+        return;
       }
-    } catch {
-      // ignore invalid stored data
+    } catch (err) {
+      console.error("[knot-connect] handleProceed refresh failed", err);
     }
-    onNext(mockTransactions);
+    setStatus(
+      "No real transactions have arrived yet. Give Knot a moment and try again."
+    );
   };
+
+  const connectedCount = Object.values(connectionStates).filter((s) => s === "connected").length;
 
   const getIcon = (merchant: DisplayMerchant) => ICON_MAP[merchant.name] || ShoppingBag;
 
@@ -536,19 +638,8 @@ export function LinkAccountsStep({ onNext, onBack }: LinkAccountsStepProps) {
         <br />
         accounts.
       </h2>
-      <p className="text-base text-muted-foreground mb-10" style={{ maxWidth: "46ch" }}>
-        Link a retailer to scan your actual purchase history. Powered by KnotAPI TransactionLink — we read transaction data only.
-      </p>
-
-      <p className="text-xs text-muted-foreground mb-6">
-        DoorDash uses the live Knot TransactionLink path when configured. Amazon, Uber Eats, and Shop Pay stay in
-        demo mode for this build.
-      </p>
-      <p className="text-xs text-muted-foreground mb-6 border border-border/60 rounded-lg px-3 py-2.5 bg-muted/30">
-        <span className="font-medium text-foreground">Knot sandbox:</span> when the login iframe opens, use the{" "}
-        <strong>test merchant credentials</strong> from your Knot developer dashboard (not your personal DoorDash
-        password). Watch the browser console for <code className="text-[11px]">[knot-connect] onSuccess</code> after a
-        successful link.
+      <p className="text-xs text-muted-foreground/80 mb-10">
+        Powered by <span className="font-medium text-foreground">Knot</span>
       </p>
 
       {/* Merchant rows */}
@@ -559,15 +650,16 @@ export function LinkAccountsStep({ onNext, onBack }: LinkAccountsStepProps) {
             <span className="text-sm">Loading merchants...</span>
           </div>
         ) : (
-          DISPLAY_MERCHANTS.map((merchant, i) => {
-            const connectionState = connectionStates[merchant.id];
-            const isConnected = connectionState === "real_connected" || connectionState === "demo_connected";
-            const isLoadingThis = loadingMerchantId === merchant.id;
+          displayMerchants.map((merchant, i) => {
+            const connectionState = connectionStates[merchant.knotMerchantId];
+            const isConnected = connectionState === "connected";
+            const isLoadingThis = loadingMerchantId === merchant.knotMerchantId;
             const Icon = getIcon(merchant);
+            const merchantTxnCount = txnCountByMerchant[merchant.knotMerchantId];
 
             return (
               <motion.div
-                key={merchant.id}
+                key={merchant.knotMerchantId}
                 initial={{ opacity: 0, y: 12 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.1 + i * 0.06, duration: 0.38, ease: EASE_EXPO }}
@@ -580,41 +672,58 @@ export function LinkAccountsStep({ onNext, onBack }: LinkAccountsStepProps) {
                   <div>
                     <div className="flex items-center gap-2">
                       <p className="font-semibold text-foreground text-sm">{merchant.name}</p>
-                      <Badge variant={merchant.mode === "real" ? "default" : "secondary"}>
-                        {merchant.mode === "real" ? "Real" : "Demo"}
-                      </Badge>
+                      {!merchant.available && backendReady && (
+                        <Badge variant="secondary">Unavailable</Badge>
+                      )}
                     </div>
                     <p className="text-xs text-muted-foreground">{merchant.subtitle}</p>
                   </div>
                 </div>
 
                 {connectionState === "pending" ? (
+                  <div className="flex items-center gap-2">
+                    <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      Waiting for login...
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleCancelPending(merchant.knotMerchantId, merchant.name)}
+                      className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
+                      aria-label={`Cancel ${merchant.name} connection`}
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ) : connectionState === "syncing" ? (
                   <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
                     <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    Connecting...
+                    Syncing
+                    {typeof merchantTxnCount === "number" && merchantTxnCount > 0 && (
+                      <span className="text-muted-foreground font-normal">
+                        · {merchantTxnCount} txns
+                      </span>
+                    )}
                   </span>
                 ) : isConnected ? (
-                  <span
-                    className={`flex items-center gap-1.5 text-xs font-semibold ${
-                      connectionState === "real_connected" ? "text-primary" : "text-muted-foreground"
-                    }`}
-                  >
+                  <span className="flex items-center gap-1.5 text-xs font-semibold text-primary">
                     <CheckCircle2 className="w-3.5 h-3.5" />
-                    {connectionState === "real_connected" ? "Connected (real)" : "Connected (demo)"}
+                    Connected
+                    {typeof merchantTxnCount === "number" && (
+                      <span className="text-muted-foreground font-normal">
+                        · {merchantTxnCount} txns
+                      </span>
+                    )}
                   </span>
                 ) : (
                   <Button
                     size="sm"
                     variant="outline"
                     onClick={() => handleLinkMerchant(merchant)}
-                    disabled={loadingMerchantId !== null}
+                    disabled={loadingMerchantId !== null || !realModeEligible || !merchant.available}
                     className="text-xs h-8"
                   >
-                    {isLoadingThis ? (
-                      <Loader2 className="w-3 h-3 animate-spin" />
-                    ) : (
-                      "Connect"
-                    )}
+                    {isLoadingThis ? <Loader2 className="w-3 h-3 animate-spin" /> : "Connect"}
                   </Button>
                 )}
               </motion.div>
@@ -631,17 +740,14 @@ export function LinkAccountsStep({ onNext, onBack }: LinkAccountsStepProps) {
         </p>
       )}
 
-      {/* Demo shortcut */}
-      <p className="text-sm text-muted-foreground mb-10">
-        No account to link?{" "}
-        <button
-          onClick={() => onNext(mockTransactions)}
-          className="text-primary font-medium underline underline-offset-2 hover:no-underline"
-        >
-          Use demo data
-        </button>{" "}
-        — 14 pre-loaded products with known hazardous chemicals.
-      </p>
+      {!backendReady && !isMock && !loadingMerchants && (
+        <p className="text-xs text-destructive mb-4">
+          Knot backend is not reachable. Make sure the{" "}
+          <code className="text-[11px]">knot-proxy</code> edge function is deployed and{" "}
+          <code className="text-[11px]">KNOT_CLIENT_ID</code> /{" "}
+          <code className="text-[11px]">KNOT_SECRET</code> secrets are set.
+        </p>
+      )}
 
       {/* Navigation */}
       <div className="flex items-center gap-4">
@@ -653,61 +759,17 @@ export function LinkAccountsStep({ onNext, onBack }: LinkAccountsStepProps) {
           <ArrowLeft className="w-3.5 h-3.5" />
           Back
         </Button>
-        {Object.values(connectionStates).some(
-          (state) => state === "real_connected" || state === "demo_connected"
-        ) && (
-          <Button onClick={handleProceed} className="gap-2 font-semibold">
-            Continue with{" "}
-            {
-              Object.values(connectionStates).filter(
-                (state) => state === "real_connected" || state === "demo_connected"
-              ).length
-            }{" "}
-            account
-            {Object.values(connectionStates).filter(
-              (state) => state === "real_connected" || state === "demo_connected"
-            ).length > 1
-              ? "s"
-              : ""}
+        {connectedCount > 0 && (
+          <Button
+            onClick={handleProceed}
+            disabled={totalRealTransactions === 0}
+            className="gap-2 font-semibold"
+          >
+            Continue with {totalRealTransactions} real transaction
+            {totalRealTransactions === 1 ? "" : "s"}
           </Button>
         )}
       </div>
-
-      {demoFallbackMerchant && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <button
-            type="button"
-            aria-label="Close demo fallback"
-            onClick={() => setDemoFallbackMerchant(null)}
-            className="absolute inset-0 bg-background/70 backdrop-blur-sm"
-          />
-          <div className="relative w-full max-w-md rounded-xl border border-border bg-card text-card-foreground shadow-2xl p-6 space-y-4">
-            <div>
-              <p className="text-xs uppercase tracking-widest text-muted-foreground mb-2">Demo fallback</p>
-              <h3 className="text-lg font-semibold text-foreground">{demoFallbackMerchant.name}</h3>
-              <p className="text-sm text-muted-foreground mt-1">
-                {demoFallbackMerchant.mode === "real"
-                  ? "Live Knot setup is unavailable, so we can simulate a connected account for the demo."
-                  : "This merchant is shown as a safe demo-only connection in the current build."}
-              </p>
-            </div>
-
-            <div className="rounded-lg border border-border bg-secondary/20 p-4 text-sm text-muted-foreground">
-              We will save this connected state locally under <span className="text-foreground">demo-connected-accounts</span>{" "}
-              and continue using the existing demo transaction dataset.
-            </div>
-
-            <div className="flex justify-end gap-2">
-              <Button type="button" variant="ghost" onClick={() => setDemoFallbackMerchant(null)}>
-                Cancel
-              </Button>
-              <Button type="button" onClick={handleConfirmDemoFallback}>
-                Connect in Demo Mode
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
     </motion.div>
   );
 }
