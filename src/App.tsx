@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { MockToggleProvider } from "@/hooks/useMockToggle";
 import { MockToggle } from "@/components/layout/MockToggle";
+import { SettlementSyncButton } from "@/components/layout/SettlementSyncButton";
 import { WizardContainer } from "@/components/wizard/WizardContainer";
 import { Loader2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
@@ -41,7 +42,10 @@ function App() {
               </div>
               <span className="font-display font-semibold text-foreground tracking-tight text-sm">Vigilant</span>
             </div>
-            <MockToggle />
+            <div className="flex items-center gap-3">
+              <SettlementSyncButton />
+              <MockToggle />
+            </div>
           </div>
         </header>
 
