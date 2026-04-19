@@ -8,7 +8,7 @@ interface MockToggleContextType {
 const MockToggleContext = createContext<MockToggleContextType | undefined>(undefined);
 
 export function MockToggleProvider({ children }: { children: ReactNode }) {
-  const [isMock, setIsMock] = useState(true);
+  const [isMock, setIsMock] = useState(false);
 
   return (
     <MockToggleContext.Provider value={{ isMock, setIsMock }}>
