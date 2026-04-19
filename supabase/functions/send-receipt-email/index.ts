@@ -1,8 +1,153 @@
-
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
+
+interface EmailItem {
+  name: string;
+  external_id?: string;
+  quantity?: number;
+  unit_price?: string | number;
+  total_price?: string | number;
+}
+
+interface Payload {
+  emailId: string;
+  lawsuitTitle: string;
+  lawsuitDefendant?: string;
+  lawsuitClaimUrl?: string;
+  merchant: string;
+  transactionId: string;
+  transactionDate: string;
+  matchedItems: EmailItem[];
+  allItems: EmailItem[];
+  pdfBase64: string;
+  pdfFileName?: string;
+  userName?: string;
+}
+
+function escapeHtml(value: string | number | undefined | null): string {
+  if (value === null || value === undefined) return "";
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function formatCurrency(value: string | number | undefined): string {
+  if (value === undefined || value === null || value === "") return "-";
+  const num = typeof value === "string" ? parseFloat(value) : value;
+  if (Number.isNaN(num)) return String(value);
+  return num.toLocaleString("en-US", { style: "currency", currency: "USD" });
+}
+
+function formatDate(iso: string): string {
+  try {
+    return new Date(iso).toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    });
+  } catch {
+    return iso;
+  }
+}
+
+function buildHtml(p: Payload): string {
+  const matchedRows = p.matchedItems
+    .map(
+      (item) => `
+      <li style="margin-bottom:6px;">
+        <strong>${escapeHtml(item.name)}</strong>
+        ${item.external_id ? `<span style="color:#888;"> - ${escapeHtml(item.external_id)}</span>` : ""}
+      </li>`
+    )
+    .join("");
+
+  const allRows = p.allItems
+    .map(
+      (item) => `
+      <tr>
+        <td style="padding:10px 12px; border-bottom:1px solid #eee; font-size:13px;">${escapeHtml(item.name)}</td>
+        <td style="padding:10px 12px; border-bottom:1px solid #eee; font-size:13px; color:#666; font-family: 'SFMono-Regular', Menlo, monospace;">${escapeHtml(item.external_id ?? "-")}</td>
+        <td style="padding:10px 12px; border-bottom:1px solid #eee; font-size:13px; text-align:right;">${escapeHtml(formatCurrency(item.unit_price))}</td>
+        <td style="padding:10px 12px; border-bottom:1px solid #eee; font-size:13px; text-align:right;">${escapeHtml(item.quantity ?? 1)}</td>
+      </tr>`
+    )
+    .join("");
+
+  return `<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Claim Receipt</title>
+  </head>
+  <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; background:#f7f5f0; margin:0; padding:32px 16px; color:#222;">
+    <div style="max-width:620px; margin:0 auto; background:#ffffff; border:1px solid #e5e3dd; border-radius:10px; overflow:hidden;">
+      <div style="padding:28px 32px 20px; border-bottom:1px solid #eee;">
+        <div style="font-size:11px; letter-spacing:0.15em; text-transform:uppercase; color:#888; font-weight:600;">Digital Transaction Record</div>
+        <h1 style="font-size:20px; margin:8px 0 4px; font-weight:700; color:#1a1a1a;">${escapeHtml(p.lawsuitTitle)}</h1>
+        ${p.lawsuitDefendant ? `<div style="color:#666; font-size:13px;">vs. ${escapeHtml(p.lawsuitDefendant)}</div>` : ""}
+      </div>
+
+      <div style="padding:24px 32px;">
+        <p style="margin:0 0 16px; font-size:14px; line-height:1.55; color:#333;">
+          ${p.userName ? `Hi ${escapeHtml(p.userName)},` : "Hello,"}
+        </p>
+        <p style="margin:0 0 20px; font-size:14px; line-height:1.55; color:#333;">
+          Attached is your verified transaction record to be used as proof of purchase for the settlement above.
+          A summary of the Knot-verified transaction is below.
+        </p>
+
+        <div style="background:#faf5e8; border:1px solid #e8dcb6; border-radius:8px; padding:16px 18px; margin-bottom:24px;">
+          <div style="font-size:11px; letter-spacing:0.12em; text-transform:uppercase; color:#8c6a1f; font-weight:700; margin-bottom:8px;">Eligible Items (Lawsuit Registry)</div>
+          <ul style="margin:0; padding-left:18px; font-size:13px; color:#333;">
+            ${matchedRows}
+          </ul>
+        </div>
+
+        <div style="display:flex; flex-wrap:wrap; gap:12px 32px; margin-bottom:20px; font-size:13px;">
+          <div><div style="color:#888; font-size:11px; text-transform:uppercase; letter-spacing:0.08em; margin-bottom:2px;">Merchant</div><div style="color:#222; font-weight:600;">${escapeHtml(p.merchant)}</div></div>
+          <div><div style="color:#888; font-size:11px; text-transform:uppercase; letter-spacing:0.08em; margin-bottom:2px;">Date</div><div style="color:#222; font-weight:600;">${escapeHtml(formatDate(p.transactionDate))}</div></div>
+          <div><div style="color:#888; font-size:11px; text-transform:uppercase; letter-spacing:0.08em; margin-bottom:2px;">Transaction ID</div><div style="color:#222; font-weight:600; font-family: 'SFMono-Regular', Menlo, monospace; font-size:12px;">${escapeHtml(p.transactionId)}</div></div>
+        </div>
+
+        <table style="width:100%; border-collapse:collapse; border:1px solid #e5e5e5; border-radius:8px; overflow:hidden;">
+          <thead>
+            <tr style="background:#1c1c20; color:#fff;">
+              <th style="padding:10px 12px; text-align:left; font-size:12px; letter-spacing:0.04em;">Item Name</th>
+              <th style="padding:10px 12px; text-align:left; font-size:12px; letter-spacing:0.04em;">External ID</th>
+              <th style="padding:10px 12px; text-align:right; font-size:12px; letter-spacing:0.04em;">Unit Price</th>
+              <th style="padding:10px 12px; text-align:right; font-size:12px; letter-spacing:0.04em;">Qty</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${allRows}
+          </tbody>
+        </table>
+
+        ${
+          p.lawsuitClaimUrl
+            ? `<p style="margin:24px 0 0; font-size:13px; color:#555;">
+                Submit this record on the official settlement site:
+                <a href="${escapeHtml(p.lawsuitClaimUrl)}" style="color:#1a56db; text-decoration:underline;">${escapeHtml(p.lawsuitClaimUrl)}</a>
+              </p>`
+            : ""
+        }
+      </div>
+
+      <div style="padding:16px 32px; border-top:1px solid #eee; background:#fafafa; font-size:12px; color:#888; text-align:center;">
+        Verified via Knot API - Secure Transaction Record
+      </div>
+    </div>
+    <div style="text-align:center; color:#aaa; font-size:11px; margin-top:16px;">
+      This is an automated claim receipt. Do not reply to this email.
+    </div>
+  </body>
+</html>`;
+}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -13,51 +158,42 @@ Deno.serve(async (req) => {
     const resendApiKey = Deno.env.get("RESEND_API_KEY");
     if (!resendApiKey) throw new Error("RESEND_API_KEY not configured");
 
-    const { image, userName, emailId } = await req.json();
+    const payload = (await req.json()) as Partial<Payload>;
 
-    if (!image || !userName || !emailId) {
+    const required: (keyof Payload)[] = [
+      "emailId",
+      "lawsuitTitle",
+      "merchant",
+      "transactionId",
+      "transactionDate",
+      "matchedItems",
+      "allItems",
+      "pdfBase64",
+    ];
+    const missing = required.filter((k) => !payload[k]);
+    if (missing.length > 0) {
       return new Response(
-        JSON.stringify({ error: "image, userName, and emailId are required" }),
+        JSON.stringify({ error: `Missing required fields: ${missing.join(", ")}` }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    // image can be a URL or a base64 data URL (e.g. "data:image/png;base64,...")
-    const imgSrc = image;
+    const full = payload as Payload;
+    const html = buildHtml(full);
+    const fileName = full.pdfFileName ?? `claim-receipt-${full.transactionId}.pdf`;
 
-    const html = `
-<!DOCTYPE html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <style>
-      body { font-family: Arial, sans-serif; background: #f9f9f9; margin: 0; padding: 0; }
-      .container { max-width: 600px; margin: 40px auto; background: #fff; border-radius: 8px; padding: 32px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
-      h1 { color: #1a1a1a; font-size: 22px; margin-bottom: 8px; }
-      p { color: #444; line-height: 1.6; }
-      .receipt-img { width: 100%; max-width: 520px; border-radius: 6px; margin: 24px 0; border: 1px solid #e5e5e5; }
-      .footer { margin-top: 32px; padding-top: 16px; border-top: 1px solid #eee; color: #888; font-size: 13px; }
-    </style>
-  </head>
-  <body>
-    <div class="container">
-      <h1>Your Receipt</h1>
-      <p>Hi ${userName},</p>
-      <p>
-        Thank you for your purchase! Please find your generated receipt below,
-        reflecting your recent SKU item transaction.
-      </p>
-      <img src="${imgSrc}" alt="Receipt" class="receipt-img" />
-      <p>
-        If you have any questions about your receipt or transaction details,
-        don't hesitate to reach out to us.
-      </p>
-      <p>Thank you for being a valued customer — we appreciate your business!</p>
-      <div class="footer">This is an automated receipt. Please do not reply to this email.</div>
-    </div>
-  </body>
-</html>
-    `.trim();
+    const resendBody = {
+      from: "receipts@resend.dev",
+      to: full.emailId,
+      subject: `Claim Receipt: ${full.lawsuitTitle}`,
+      html,
+      attachments: [
+        {
+          filename: fileName,
+          content: full.pdfBase64,
+        },
+      ],
+    };
 
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
@@ -65,12 +201,7 @@ Deno.serve(async (req) => {
         Authorization: `Bearer ${resendApiKey}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        from: "receipts@resend.dev",
-        to: emailId,
-        subject: `Your Receipt, ${userName}`,
-        html,
-      }),
+      body: JSON.stringify(resendBody),
     });
 
     const resBody = await res.json();
@@ -83,7 +214,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    console.log("[send-receipt-email] Sent to", emailId, "id:", resBody.id);
+    console.log("[send-receipt-email] Sent to", full.emailId, "id:", resBody.id);
     return new Response(JSON.stringify({ success: true, id: resBody.id }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

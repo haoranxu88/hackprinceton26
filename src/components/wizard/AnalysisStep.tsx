@@ -4,25 +4,116 @@ import { Badge } from "@/components/ui/badge";
 import { useMockToggle } from "@/hooks/useMockToggle";
 import { mockAnalysis, type ExposureAnalysis } from "@/data/mock-analysis";
 import { mockLawsuits } from "@/data/mock-lawsuits";
-import { mockTrials } from "@/data/mock-trials";
 import { analyzeExposure, matchOpportunities } from "@/lib/api";
 import type { Transaction } from "@/data/mock-transactions";
 import type { Lawsuit } from "@/data/mock-lawsuits";
-import type { ClinicalTrial } from "@/data/mock-trials";
 import { Cpu } from "lucide-react";
 
 const EASE_EXPO = [0.16, 1, 0.3, 1] as const;
 
+/**
+ * Build a dedupe key that treats two lawsuit rows as "the same" claim when:
+ * - their claim URLs match (strongest signal), OR
+ * - their (normalized title + defendant) pair matches.
+ * This catches both duplicate scraper rows with different Supabase IDs and
+ * LLM responses that repeat a single catalog entry.
+ */
+function lawsuitDedupeKey(l: {
+  title?: string;
+  defendant?: string;
+  claimUrl?: string;
+}): string {
+  const norm = (s: string | undefined) =>
+    (s ?? "")
+      .toLowerCase()
+      .replace(/\s+/g, " ")
+      .replace(/[^a-z0-9 ]/g, "")
+      .trim();
+  const url = norm(l.claimUrl).replace(/^https?/, "").replace(/\/$/, "");
+  if (url) return `u:${url}`;
+  return `td:${norm(l.title)}|${norm(l.defendant)}`;
+}
+
+/**
+ * Normalize lawsuit rows coming back from the edge function so downstream UI
+ * can rely on matchType / matchedOn / matchedChemicals / matchedProducts being
+ * defined, even if the LLM or a cached catalog row omitted them. Also collapses
+ * duplicate rows introduced by the scraper or a repeating LLM.
+ */
+function normalizeLawsuits(raw: unknown): Lawsuit[] {
+  if (!Array.isArray(raw)) return [];
+  const mapped = raw
+    .filter((r): r is Record<string, unknown> => r !== null && typeof r === "object")
+    .map((r) => {
+      const matchedProducts = Array.isArray(r.matchedProducts)
+        ? (r.matchedProducts as unknown[]).map(String).filter(Boolean)
+        : [];
+      const matchedChemicals = Array.isArray(r.matchedChemicals)
+        ? (r.matchedChemicals as unknown[]).map(String).filter(Boolean)
+        : [];
+      const matchedOnRaw = Array.isArray(r.matchedOn)
+        ? (r.matchedOn as unknown[]).map(String).filter(Boolean)
+        : [];
+      const rawType = typeof r.matchType === "string" ? r.matchType.toLowerCase() : "";
+      const matchType: Lawsuit["matchType"] =
+        rawType === "product" || rawType === "chemical"
+          ? (rawType as Lawsuit["matchType"])
+          : matchedProducts.length > 0
+          ? "product"
+          : "chemical";
+      const matchedOn =
+        matchedOnRaw.length > 0
+          ? matchedOnRaw
+          : matchType === "product"
+          ? matchedProducts.slice(0, 4)
+          : matchedChemicals.slice(0, 4);
+
+      return {
+        id: String(r.id ?? crypto.randomUUID()),
+        title: String(r.title ?? ""),
+        defendant: String(r.defendant ?? ""),
+        settlementAmount: String(r.settlementAmount ?? "Unknown"),
+        deadline: String(r.deadline ?? "TBD"),
+        status: (r.status === "pending" || r.status === "closed" ? r.status : "active") as Lawsuit["status"],
+        matchType,
+        matchedOn,
+        matchedChemicals,
+        matchedProducts,
+        description: String(r.description ?? ""),
+        payoutTiers: Array.isArray(r.payoutTiers)
+          ? (r.payoutTiers as Lawsuit["payoutTiers"])
+          : [],
+        claimUrl: typeof r.claimUrl === "string" ? r.claimUrl : undefined,
+      } satisfies Lawsuit;
+    });
+
+  // Dedupe: keep the first occurrence of each logical claim. Prefer rows with a
+  // product-level match when duplicates disagree on matchType.
+  const seen = new Map<string, Lawsuit>();
+  for (const l of mapped) {
+    const key = lawsuitDedupeKey(l);
+    const existing = seen.get(key);
+    if (!existing) {
+      seen.set(key, l);
+      continue;
+    }
+    if (existing.matchType === "chemical" && l.matchType === "product") {
+      seen.set(key, l);
+    }
+  }
+  return Array.from(seen.values());
+}
+
 interface AnalysisStepProps {
   transactions: Transaction[];
-  onComplete: (analysis: ExposureAnalysis, lawsuits: Lawsuit[], trials: ClinicalTrial[]) => void;
+  onComplete: (analysis: ExposureAnalysis, lawsuits: Lawsuit[]) => void;
 }
 
 const STAGES = [
   { label: "Scanning product labels", duration: 1200 },
   { label: "Cross-referencing EPA chemical database", duration: 1500 },
   { label: "Calculating exposure scores", duration: 1000 },
-  { label: "Matching legal & clinical opportunities", duration: 800 },
+  { label: "Matching active settlements", duration: 800 },
 ];
 
 const DISCOVERED_CHEMICALS: Array<{
@@ -62,7 +153,7 @@ export function AnalysisStep({ transactions, onComplete }: AnalysisStepProps) {
           }
         }
         completedRef.current = true;
-        onComplete(mockAnalysis, mockLawsuits, mockTrials);
+        onComplete(mockAnalysis, mockLawsuits);
       } else {
         const startDrift = (from: number, to: number) => {
           let current = from;
@@ -84,7 +175,7 @@ export function AnalysisStep({ transactions, onComplete }: AnalysisStepProps) {
 
           if (allProducts.length === 0) {
             completedRef.current = true;
-            onComplete(mockAnalysis, mockLawsuits, mockTrials);
+            onComplete(mockAnalysis, mockLawsuits);
             return;
           }
 
@@ -101,7 +192,7 @@ export function AnalysisStep({ transactions, onComplete }: AnalysisStepProps) {
 
           if (chemicals.length === 0) {
             completedRef.current = true;
-            onComplete(analysisResult || mockAnalysis, mockLawsuits, mockTrials);
+            onComplete(analysisResult || mockAnalysis, mockLawsuits);
             return;
           }
 
@@ -112,14 +203,14 @@ export function AnalysisStep({ transactions, onComplete }: AnalysisStepProps) {
           stopDrift();
           setProgress(100);
           completedRef.current = true;
+          const normalized = normalizeLawsuits(opportunities?.lawsuits);
           onComplete(
             analysisResult ?? mockAnalysis,
-            opportunities?.lawsuits ?? mockLawsuits,
-            opportunities?.trials ?? mockTrials
+            normalized.length > 0 ? normalized : mockLawsuits,
           );
         } catch {
           completedRef.current = true;
-          onComplete(mockAnalysis, mockLawsuits, mockTrials);
+          onComplete(mockAnalysis, mockLawsuits);
         }
       }
     };

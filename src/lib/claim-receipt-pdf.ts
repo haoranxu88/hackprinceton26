@@ -43,11 +43,11 @@ function formatCurrency(value: string | number): string {
   return num.toLocaleString("en-US", { style: "currency", currency: "USD" });
 }
 
-export function generateClaimReceiptPdf(
+function buildClaimReceiptPdf(
   txn: Transaction,
   matched: Product[],
   lawsuit: Lawsuit
-): void {
+): jsPDF {
   const doc = new jsPDF({ unit: "pt", format: "letter" });
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
@@ -156,5 +156,33 @@ export function generateClaimReceiptPdf(
     { align: "center" }
   );
 
-  doc.save(`claim-receipt-${lawsuit.id}-${txn.id}.pdf`);
+  return doc;
+}
+
+export function claimReceiptFileName(txn: Transaction, lawsuit: Lawsuit): string {
+  return `claim-receipt-${lawsuit.id}-${txn.id}.pdf`;
+}
+
+export function generateClaimReceiptPdf(
+  txn: Transaction,
+  matched: Product[],
+  lawsuit: Lawsuit
+): void {
+  const doc = buildClaimReceiptPdf(txn, matched, lawsuit);
+  doc.save(claimReceiptFileName(txn, lawsuit));
+}
+
+/**
+ * Generate the claim receipt PDF and return its bytes as a plain base64 string
+ * (no data URI prefix). Safe to transport in JSON payloads.
+ */
+export function generateClaimReceiptPdfBase64(
+  txn: Transaction,
+  matched: Product[],
+  lawsuit: Lawsuit
+): string {
+  const doc = buildClaimReceiptPdf(txn, matched, lawsuit);
+  const dataUri = doc.output("datauristring");
+  const commaIdx = dataUri.indexOf(",");
+  return commaIdx >= 0 ? dataUri.slice(commaIdx + 1) : dataUri;
 }

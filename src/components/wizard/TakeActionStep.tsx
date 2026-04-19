@@ -1,17 +1,13 @@
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { LawsuitCard } from "@/components/claims/LawsuitCard";
-import { TrialCard } from "@/components/trials/TrialCard";
 import type { Lawsuit } from "@/data/mock-lawsuits";
-import type { ClinicalTrial } from "@/data/mock-trials";
 import { RotateCcw } from "lucide-react";
 
 const EASE_EXPO = [0.16, 1, 0.3, 1] as const;
 
 interface TakeActionStepProps {
   lawsuits: Lawsuit[];
-  trials: ClinicalTrial[];
   onRestart: () => void;
 }
 
@@ -25,9 +21,28 @@ const fadeUp = {
   show: { opacity: 1, y: 0, transition: { duration: 0.42, ease: EASE_EXPO } },
 };
 
-export function TakeActionStep({ lawsuits, trials, onRestart }: TakeActionStepProps) {
-  const activeLawsuits = lawsuits.filter((l) => l.status === "active");
-  const recruitingTrials = trials.filter((t) => t.status === "recruiting");
+/**
+ * Hide lawsuits whose claim deadline has already passed. TBD / pending / unparseable
+ * deadlines are kept — they're still actionable, just not yet dated.
+ */
+function isDeadlineStillOpen(deadline: string | undefined): boolean {
+  if (!deadline) return true;
+  const trimmed = deadline.trim();
+  if (!trimmed || trimmed.toUpperCase() === "TBD") return true;
+  const ts = Date.parse(trimmed);
+  if (Number.isNaN(ts)) return true;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return ts >= today.getTime();
+}
+
+export function TakeActionStep({ lawsuits, onRestart }: TakeActionStepProps) {
+  const visibleLawsuits = lawsuits.filter((l) => isDeadlineStillOpen(l.deadline));
+  const sortedLawsuits = [...visibleLawsuits].sort((a, b) => {
+    if (a.matchType === b.matchType) return 0;
+    return a.matchType === "product" ? -1 : 1;
+  });
+  const activeLawsuits = sortedLawsuits.filter((l) => l.status === "active");
 
   return (
     <motion.div
@@ -48,40 +63,25 @@ export function TakeActionStep({ lawsuits, trials, onRestart }: TakeActionStepPr
           matched to your history.
         </h2>
         <p className="text-base text-muted-foreground" style={{ maxWidth: "52ch" }}>
-          Based on your purchase records and chemical exposure profile.{" "}
-          {recruitingTrials.length > 0 && (
-            <>{recruitingTrials.length} clinical trial{recruitingTrials.length !== 1 ? "s" : ""} also matched.</>
-          )}
+          Based on your purchase records and chemical exposure profile.
         </p>
       </motion.div>
 
       <motion.div variants={fadeUp}>
-        <Tabs defaultValue="lawsuits" className="w-full">
-          <TabsList className="bg-secondary border border-border/50 h-9 p-0.5 w-auto inline-flex mb-6">
-            <TabsTrigger value="lawsuits" className="text-xs h-8 px-4 data-[state=active]:bg-background data-[state=active]:shadow-sm">
-              Settlements ({lawsuits.length})
-            </TabsTrigger>
-            <TabsTrigger value="trials" className="text-xs h-8 px-4 data-[state=active]:bg-background data-[state=active]:shadow-sm">
-              Clinical Trials ({trials.length})
-            </TabsTrigger>
-          </TabsList>
+        <div className="flex items-center gap-2 mb-6">
+          <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-semibold">
+            Settlements
+          </span>
+          <span className="text-xs text-muted-foreground">
+            ({sortedLawsuits.length})
+          </span>
+        </div>
 
-          <TabsContent value="lawsuits">
-            <div className="divide-y divide-border">
-              {lawsuits.map((lawsuit) => (
-                <LawsuitCard key={lawsuit.id} lawsuit={lawsuit} />
-              ))}
-            </div>
-          </TabsContent>
-
-          <TabsContent value="trials">
-            <div className="divide-y divide-border">
-              {trials.map((trial) => (
-                <TrialCard key={trial.id} trial={trial} />
-              ))}
-            </div>
-          </TabsContent>
-        </Tabs>
+        <div className="divide-y divide-border">
+          {sortedLawsuits.map((lawsuit) => (
+            <LawsuitCard key={lawsuit.id} lawsuit={lawsuit} />
+          ))}
+        </div>
       </motion.div>
 
       <motion.div variants={fadeUp} className="pt-8 border-t border-border flex justify-center">

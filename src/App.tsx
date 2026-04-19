@@ -40,7 +40,7 @@ function App() {
                   <path d="M6 1L10 3.5V8.5L6 11L2 8.5V3.5L6 1Z" stroke="hsl(38,22%,97%)" strokeWidth="1.5" strokeLinejoin="round" />
                 </svg>
               </div>
-              <span className="font-display font-semibold text-foreground tracking-tight text-sm">Vigilant</span>
+              <span className="font-display font-semibold text-foreground tracking-tight text-2xl">Aletheia</span>
             </div>
             <div className="flex items-center gap-3">
               <SettlementSyncButton />

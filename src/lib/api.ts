@@ -115,12 +115,34 @@ export async function dedalusAgent(task: "analyze" | "match", data: Record<strin
   return invokeEdgeFunction("dedalus-agent", { task, data });
 }
 
+export interface SendClaimReceiptEmailItem {
+  name: string;
+  external_id?: string;
+  quantity?: number;
+  unit_price?: string | number;
+  total_price?: string | number;
+}
+
+export interface SendClaimReceiptEmailPayload {
+  emailId: string;
+  lawsuitTitle: string;
+  lawsuitDefendant?: string;
+  lawsuitClaimUrl?: string;
+  merchant: string;
+  transactionId: string;
+  transactionDate: string;
+  matchedItems: SendClaimReceiptEmailItem[];
+  allItems: SendClaimReceiptEmailItem[];
+  /** Plain base64 (no data URI prefix) of the PDF to attach. */
+  pdfBase64: string;
+  pdfFileName?: string;
+  userName?: string;
+}
+
 /**
- * Send a receipt email via Resend.
- * @param image  - A public image URL or base64 data URL (e.g. "data:image/png;base64,...")
- * @param userName - Recipient's display name
- * @param emailId  - Recipient's email address
+ * Send a claim-receipt email via Resend with the generated PDF attached.
+ * Edge function: `send-receipt-email`. Requires RESEND_API_KEY to be set on the function.
  */
-export async function sendReceiptEmail(image: string, userName: string, emailId: string) {
-  return invokeEdgeFunction("send-receipt-email", { image, userName, emailId });
+export async function sendClaimReceiptEmail(payload: SendClaimReceiptEmailPayload) {
+  return invokeEdgeFunction("send-receipt-email", payload as unknown as Record<string, unknown>);
 }

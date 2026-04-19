@@ -2,7 +2,6 @@ import { useState, useCallback } from "react";
 import type { Transaction } from "@/data/mock-transactions";
 import type { ExposureAnalysis } from "@/data/mock-analysis";
 import type { Lawsuit } from "@/data/mock-lawsuits";
-import type { ClinicalTrial } from "@/data/mock-trials";
 
 export type WizardStep = 0 | 1 | 2 | 3 | 4;
 
@@ -18,7 +17,6 @@ export interface WizardData {
   transactions: Transaction[];
   analysis: ExposureAnalysis | null;
   lawsuits: Lawsuit[];
-  trials: ClinicalTrial[];
 }
 
 export function useWizard() {
@@ -27,7 +25,6 @@ export function useWizard() {
     transactions: [],
     analysis: null,
     lawsuits: [],
-    trials: [],
   });
 
   const nextStep = useCallback(() => {

@@ -54,7 +54,7 @@ export function WelcomeStep({ onNext }: { onNext: () => void }) {
         className="text-lg text-muted-foreground leading-relaxed mb-12"
         style={{ maxWidth: "52ch" }}
       >
-        Vigilant scans your purchase history for products tied to class action
+        Aletheia scans your purchase history for products tied to class action
         lawsuits — then tells you exactly what you may be owed.
       </motion.p>
 

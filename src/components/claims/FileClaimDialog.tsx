@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -10,11 +10,14 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import type { Lawsuit } from "@/data/mock-lawsuits";
-import { mockTransactions } from "@/data/mock-transactions";
+import { mockTransactions, type Transaction, type Product } from "@/data/mock-transactions";
 import {
   findMatchingTransactions,
   generateClaimReceiptPdf,
+  generateClaimReceiptPdfBase64,
+  claimReceiptFileName,
 } from "@/lib/claim-receipt-pdf";
+import { sendClaimReceiptEmail } from "@/lib/api";
 import {
   ExternalLink,
   UserSquare,
@@ -22,6 +25,9 @@ import {
   CreditCard,
   Mail,
   CheckCircle2,
+  Send,
+  Loader2,
+  AlertCircle,
 } from "lucide-react";
 
 interface FileClaimDialogProps {
@@ -78,6 +84,157 @@ function StepHeader({
   );
 }
 
+type SendStatus =
+  | { kind: "idle" }
+  | { kind: "sending" }
+  | { kind: "sent" }
+  | { kind: "error"; message: string };
+
+function TransactionReceiptRow({
+  txn,
+  matched,
+  lawsuit,
+}: {
+  txn: Transaction;
+  matched: Product[];
+  lawsuit: Lawsuit;
+}) {
+  const [email, setEmail] = useState("");
+  const [status, setStatus] = useState<SendStatus>({ kind: "idle" });
+
+  const emailLooksValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+
+  async function handleSend() {
+    if (!emailLooksValid) {
+      setStatus({ kind: "error", message: "Enter a valid email address." });
+      return;
+    }
+    setStatus({ kind: "sending" });
+    try {
+      const pdfBase64 = generateClaimReceiptPdfBase64(txn, matched, lawsuit);
+      await sendClaimReceiptEmail({
+        emailId: email.trim(),
+        lawsuitTitle: lawsuit.title,
+        lawsuitDefendant: lawsuit.defendant,
+        lawsuitClaimUrl: lawsuit.claimUrl,
+        merchant: txn.merchant,
+        transactionId: txn.id,
+        transactionDate: txn.datetime,
+        matchedItems: matched.map((p) => ({
+          name: p.name,
+          external_id: p.external_id,
+          quantity: p.quantity,
+          unit_price: p.price.unit_price,
+          total_price: p.price.total,
+        })),
+        allItems: txn.products.map((p) => ({
+          name: p.name,
+          external_id: p.external_id,
+          quantity: p.quantity,
+          unit_price: p.price.unit_price,
+          total_price: p.price.total,
+        })),
+        pdfBase64,
+        pdfFileName: claimReceiptFileName(txn, lawsuit),
+      });
+      setStatus({ kind: "sent" });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to send email.";
+      setStatus({ kind: "error", message });
+    }
+  }
+
+  return (
+    <div className="rounded-lg border border-border bg-card px-4 py-3">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-xs font-semibold text-foreground">
+              {txn.merchant}
+            </span>
+            <span className="text-[10px] text-muted-foreground">
+              {formatDate(txn.datetime)}
+            </span>
+            <Badge variant="critical" className="text-[9px]">
+              Eligible
+            </Badge>
+          </div>
+          <p className="text-xs text-muted-foreground truncate">
+            {matched.map((p) => p.name).join(", ")}
+          </p>
+        </div>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => generateClaimReceiptPdf(txn, matched, lawsuit)}
+          className="gap-1.5 text-xs shrink-0"
+        >
+          <FileDown className="w-3 h-3" />
+          Download PDF
+        </Button>
+      </div>
+
+      <div className="mt-3 pt-3 border-t border-border/70">
+        <label
+          htmlFor={`email-${txn.id}`}
+          className="text-[10px] uppercase tracking-widest text-muted-foreground font-semibold mb-1.5 flex items-center gap-1.5"
+        >
+          <Mail className="w-3 h-3" />
+          Email this receipt
+        </label>
+        <div className="flex items-center gap-2">
+          <input
+            id={`email-${txn.id}`}
+            type="email"
+            inputMode="email"
+            autoComplete="email"
+            placeholder="you@example.com"
+            value={email}
+            onChange={(e) => {
+              setEmail(e.target.value);
+              if (status.kind === "error" || status.kind === "sent") {
+                setStatus({ kind: "idle" });
+              }
+            }}
+            disabled={status.kind === "sending"}
+            className="flex-1 h-8 rounded-md border border-border bg-background px-2.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+          />
+          <Button
+            size="sm"
+            onClick={handleSend}
+            disabled={!emailLooksValid || status.kind === "sending"}
+            className="gap-1.5 text-xs shrink-0"
+          >
+            {status.kind === "sending" ? (
+              <>
+                <Loader2 className="w-3 h-3 animate-spin" />
+                Sending
+              </>
+            ) : (
+              <>
+                <Send className="w-3 h-3" />
+                Send
+              </>
+            )}
+          </Button>
+        </div>
+        {status.kind === "sent" && (
+          <p className="text-[11px] text-emerald-600 mt-1.5 flex items-center gap-1">
+            <CheckCircle2 className="w-3 h-3" />
+            Sent. Check the inbox (and spam) for the receipt PDF.
+          </p>
+        )}
+        {status.kind === "error" && (
+          <p className="text-[11px] text-destructive mt-1.5 flex items-center gap-1">
+            <AlertCircle className="w-3 h-3" />
+            {status.message}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function FileClaimDialog({
   lawsuit,
   open,
@@ -118,16 +275,34 @@ export function FileClaimDialog({
                 icon={<ExternalLink className="w-3.5 h-3.5" />}
               />
               <div className="pl-[52px] mt-3">
-                <a
-                  href={lawsuit.claimUrl ?? "#"}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  <Button size="sm" variant="outline" className="gap-1.5 text-xs">
-                    <ExternalLink className="w-3 h-3" />
-                    Open Settlement Site
-                  </Button>
-                </a>
+                {lawsuit.claimUrl ? (
+                  <>
+                    <a
+                      href={lawsuit.claimUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <Button size="sm" className="gap-1.5 text-xs">
+                        <ExternalLink className="w-3 h-3" />
+                        Open Settlement Site
+                      </Button>
+                    </a>
+                    <p className="text-[11px] text-muted-foreground mt-2 break-all">
+                      <a
+                        href={lawsuit.claimUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="underline decoration-dotted underline-offset-2 hover:text-foreground"
+                      >
+                        {lawsuit.claimUrl.replace(/^https?:\/\//, "")}
+                      </a>
+                    </p>
+                  </>
+                ) : (
+                  <div className="rounded-lg border border-border bg-secondary/40 px-4 py-3 text-xs text-muted-foreground">
+                    No official claim URL is listed for this settlement yet. Search the defendant's name and "class action settlement" to find the administrator's site.
+                  </div>
+                )}
                 {lawsuit.deadline !== "TBD" && (
                   <p className="text-[11px] text-muted-foreground mt-2">
                     Claim deadline: {formatDate(lawsuit.deadline)}
@@ -183,36 +358,12 @@ export function FileClaimDialog({
                   </div>
                 ) : (
                   matchingTxns.map(({ txn, matched }) => (
-                    <div
+                    <TransactionReceiptRow
                       key={txn.id}
-                      className="rounded-lg border border-border bg-card px-4 py-3 flex items-start justify-between gap-4"
-                    >
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="text-xs font-semibold text-foreground">
-                            {txn.merchant}
-                          </span>
-                          <span className="text-[10px] text-muted-foreground">
-                            {formatDate(txn.datetime)}
-                          </span>
-                          <Badge variant="critical" className="text-[9px]">
-                            Eligible
-                          </Badge>
-                        </div>
-                        <p className="text-xs text-muted-foreground truncate">
-                          {matched.map((p) => p.name).join(", ")}
-                        </p>
-                      </div>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => generateClaimReceiptPdf(txn, matched, lawsuit)}
-                        className="gap-1.5 text-xs shrink-0"
-                      >
-                        <FileDown className="w-3 h-3" />
-                        Download PDF
-                      </Button>
-                    </div>
+                      txn={txn}
+                      matched={matched}
+                      lawsuit={lawsuit}
+                    />
                   ))
                 )}
               </div>

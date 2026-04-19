@@ -3,14 +3,13 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { FileClaimDialog } from "@/components/claims/FileClaimDialog";
 import type { Lawsuit } from "@/data/mock-lawsuits";
-import { FileText, ChevronDown, ChevronUp, Clock } from "lucide-react";
+import { FileText, Clock } from "lucide-react";
 
 interface LawsuitCardProps {
   lawsuit: Lawsuit;
 }
 
 export function LawsuitCard({ lawsuit }: LawsuitCardProps) {
-  const [expanded, setExpanded] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
 
   const daysUntilDeadline =
@@ -37,9 +36,19 @@ export function LawsuitCard({ lawsuit }: LawsuitCardProps) {
             >
               {lawsuit.status}
             </Badge>
-            <span className="text-xs text-muted-foreground">
-              {lawsuit.matchConfidence}% match
-            </span>
+            {(() => {
+              const matchedOn = Array.isArray(lawsuit.matchedOn) ? lawsuit.matchedOn : [];
+              const isProduct = lawsuit.matchType === "product";
+              return (
+                <Badge
+                  variant={isProduct ? "safe" : "moderate"}
+                  className="text-[10px]"
+                  title={matchedOn.length > 0 ? `Matched on: ${matchedOn.join(", ")}` : undefined}
+                >
+                  {isProduct ? "Product matched" : "Chemical matched"}
+                </Badge>
+              );
+            })()}
           </div>
 
           <p className="font-semibold text-foreground text-sm mb-0.5">{lawsuit.title}</p>
@@ -76,41 +85,8 @@ export function LawsuitCard({ lawsuit }: LawsuitCardProps) {
             <FileText className="w-3 h-3" />
             Help Me File a Claim
           </Button>
-          <button
-            onClick={() => setExpanded(!expanded)}
-            className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground hover:no-underline transition-colors flex items-center gap-1"
-          >
-            {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-            {expanded ? "Hide" : "Payout tiers"}
-          </button>
         </div>
       </div>
-
-      {/* Expanded: description + payout tiers */}
-      {expanded && (
-        <div className="mt-5 pt-5 border-t border-border space-y-4">
-          <p className="text-sm text-muted-foreground leading-relaxed">{lawsuit.description}</p>
-
-          <div>
-            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-3">
-              Payout Tiers
-            </p>
-            <div className="space-y-0 divide-y divide-border">
-              {lawsuit.payoutTiers.map((tier) => (
-                <div key={tier.tier} className="flex items-start justify-between py-3 gap-4">
-                  <div>
-                    <p className="text-sm font-semibold text-foreground">{tier.tier}</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">{tier.requirement}</p>
-                  </div>
-                  <span className="font-display font-bold text-primary text-sm shrink-0">
-                    {tier.amount}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
 
       <FileClaimDialog
         lawsuit={lawsuit}

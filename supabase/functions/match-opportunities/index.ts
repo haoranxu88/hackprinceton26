@@ -11,47 +11,62 @@ import { getServiceClient } from "../_shared/supabase.ts";
  * 2. Ask Gemini to score / narrate matches ONLY from that catalog.
  * 3. If Gemini whiffs (returns zero lawsuits), fall back to a deterministic
  *    keyword ranker so users always see relevant catalog rows.
- *
- * Clinical trials remain LLM-generated because payout specificity matters less.
  */
 
 function normChem(s: string): string {
   return s.trim().toLowerCase();
 }
 
-/** Deterministic overlap score when the LLM returns no lawsuits. */
-function scoreCatalogRow(row: Record<string, unknown>, chemicals: string[]): number {
-  const tokens = chemicals.map(normChem).filter(Boolean);
-  if (!tokens.length) return 0;
+type MatchType = "product" | "chemical";
+interface CatalogMatch {
+  type: MatchType;
+  matchedOn: string[];
+}
+
+/**
+ * Classify a catalog row against the user's detected tokens (chemicals + purchased product keywords).
+ * Returns "product" if any token hits `title` / `eligible_products` / `product_category`,
+ * "chemical" if any token hits `chemicals_involved` only,
+ * or null if there's no overlap at all.
+ */
+function classifyCatalogRow(row: Record<string, unknown>, chemicals: string[]): CatalogMatch | null {
+  const tokens = chemicals.map(normChem).filter((t) => t.length >= 3);
+  if (!tokens.length) return null;
 
   const involved = Array.isArray(row.chemicals_involved)
     ? (row.chemicals_involved as unknown[]).map((c) => normChem(String(c))).filter(Boolean)
     : [];
 
-  const hay = [
-    row.title,
-    row.defendant,
-    row.product_category,
-    row.eligible_products,
-    involved.join(" "),
-  ]
+  const productHay = [row.title, row.eligible_products, row.product_category]
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
 
-  let score = 0;
+  const productHits: string[] = [];
+  const chemicalHits: string[] = [];
+
   for (const t of tokens) {
-    if (!t) continue;
-    if (involved.some((i) => i === t || i.includes(t) || t.includes(i))) score += 42;
-    else if (hay.includes(t)) score += 22;
-    else {
-      const parts = t.split(/[^a-z0-9]+/).filter((p) => p.length >= 4);
-      for (const p of parts) {
-        if (hay.includes(p)) score += 12;
-      }
+    if (productHay.includes(t)) {
+      productHits.push(t);
+      continue;
+    }
+    const parts = t.split(/[^a-z0-9]+/).filter((p) => p.length >= 4);
+    if (parts.some((p) => productHay.includes(p))) {
+      productHits.push(t);
+      continue;
+    }
+    if (involved.some((i) => i === t || i.includes(t) || t.includes(i))) {
+      chemicalHits.push(t);
     }
   }
-  return Math.min(100, score);
+
+  if (productHits.length > 0) {
+    return { type: "product", matchedOn: Array.from(new Set(productHits)) };
+  }
+  if (chemicalHits.length > 0) {
+    return { type: "chemical", matchedOn: Array.from(new Set(chemicalHits)) };
+  }
+  return null;
 }
 
 function fallbackLawsuitsFromCatalog(
@@ -59,28 +74,28 @@ function fallbackLawsuitsFromCatalog(
   chemicals: string[],
   max = 8,
 ): Record<string, unknown>[] {
-  const scored = catalog
-    .map((row) => ({ row, score: scoreCatalogRow(row, chemicals) }))
-    .sort((a, b) => b.score - a.score);
+  const classified = catalog
+    .map((row) => ({ row, match: classifyCatalogRow(row, chemicals) }))
+    .filter((x): x is { row: Record<string, unknown>; match: CatalogMatch } => x.match !== null);
 
-  const strong = scored.filter((s) => s.score >= 8).slice(0, max);
-  const picked = strong.length > 0 ? strong : scored.slice(0, Math.min(5, scored.length));
+  // Sort product matches above chemical matches.
+  classified.sort((a, b) => {
+    if (a.match.type === b.match.type) return 0;
+    return a.match.type === "product" ? -1 : 1;
+  });
 
-  return picked.map(({ row, score }) => {
+  return classified.slice(0, max).map(({ row, match }) => {
     const payout = row.payout_estimate != null ? String(row.payout_estimate) : "Unknown";
     const tiers = Array.isArray(row.payout_tiers) && (row.payout_tiers as unknown[]).length
       ? row.payout_tiers
       : [{ tier: "Standard", amount: payout, requirement: "See claim site" }];
 
-    const conf = score >= 28 ? score : Math.min(44, 26 + Math.round(score / 2));
-
-    const matched = chemicals.filter((c) => {
+    const matchedChemicals = chemicals.filter((c) => {
       const t = normChem(c);
       const inv = Array.isArray(row.chemicals_involved)
         ? (row.chemicals_involved as unknown[]).map((x) => normChem(String(x)))
         : [];
-      const hay = `${row.title} ${row.defendant} ${row.eligible_products} ${row.product_category}`.toLowerCase();
-      return inv.some((i) => i.includes(t) || t.includes(i)) || hay.includes(t);
+      return inv.some((i) => i.includes(t) || t.includes(i));
     });
 
     return {
@@ -90,30 +105,32 @@ function fallbackLawsuitsFromCatalog(
       settlementAmount: payout,
       deadline: row.deadline != null ? String(row.deadline) : "TBD",
       status: String(row.status ?? "active"),
-      matchConfidence: conf,
-      matchedChemicals: matched.length ? matched : chemicals.slice(0, 2),
+      matchType: match.type,
+      matchedOn: match.matchedOn,
+      matchedChemicals: matchedChemicals.length ? matchedChemicals : chemicals.slice(0, 2),
       matchedProducts: String(row.eligible_products ?? "")
         .split(",")
         .map((s) => s.trim())
         .filter(Boolean)
         .slice(0, 4),
       description:
-        score >= 12
-          ? "Matched from curated settlement catalog based on chemical or product keywords in the listing."
-          : "Broad catalog match — confirm chemicals and products against the official claim notice.",
+        match.type === "product"
+          ? "Named in the settlement's eligible-product list."
+          : "Matched on a chemical/ingredient disclosed in the settlement.",
       payoutTiers: tiers,
+      claimUrl: typeof row.claim_url === "string" && row.claim_url ? row.claim_url : undefined,
     };
   });
 }
 
 function buildCatalogPrompt(chemicals: string[], catalog: Record<string, unknown>[]): string {
   const catalogJson = JSON.stringify(catalog).slice(0, 95_000);
-  return `You match detected consumer-product chemicals to known class action settlements and suggest clinical trials.
+  return `You match detected consumer-product chemicals to known class action settlements.
 
 Detected chemicals (from purchase history / exposure scan):
 ${chemicals.join(", ")}
 
-Settlement catalog (JSON array from our database — use ONLY these entries for lawsuits; each has id, defendant, title, payout_estimate, deadline, eligible_products, chemicals_involved, payout_tiers, claim_url, proof_required):
+Settlement catalog (JSON array from our database — use ONLY these entries; each has id, defendant, title, payout_estimate, deadline, eligible_products, chemicals_involved, payout_tiers, claim_url, proof_required):
 ${catalogJson}
 
 Return ONLY valid JSON (no markdown, no code fences):
@@ -125,50 +142,34 @@ Return ONLY valid JSON (no markdown, no code fences):
     "settlementAmount":"<use catalog payout_estimate verbatim when possible>",
     "deadline":"<from catalog deadline; use TBD if empty>",
     "status":"<active|pending|closed> — prefer active from catalog status",
-    "matchConfidence":<0-100 based on overlap between detected chemicals and catalog.chemicals_involved / eligible_products>,
+    "matchType":"<'product' if any detected chemical/product keyword appears in catalog.title / eligible_products / product_category; else 'chemical' if it only appears in catalog.chemicals_involved>",
+    "matchedOn":[<the specific detected tokens that triggered the match, 1-4 items>],
     "matchedChemicals":[<subset of detected chemicals that justify the match>],
     "matchedProducts":[<short product keywords inferred from eligible_products, 1-4 items>],
-    "description":"<one sentence tying user's chemicals to this settlement>",
-    "payoutTiers": <copy catalog payout_tiers array if non-empty; else [{"tier":"Standard","amount":settlementAmount,"requirement":"See claim site"}]>
-  }
-],
-"trials":[
-  {
-    "id":"<id>",
-    "title":"<title>",
-    "sponsor":"<pharma>",
-    "molecule":"<drug>",
-    "phase":"<Phase 1-4>",
-    "condition":"<condition>",
-    "linkedChemicals":[<chemicals>],
-    "eligibilityMatch":<0-100>,
-    "locations":[<cities>],
-    "status":"<recruiting|active>",
-    "description":"<desc>",
-    "nctId":"<NCT>",
-    "compensation":"<comp>"
+    "description":"<one sentence tying user's chemicals/products to this settlement>",
+    "payoutTiers": <copy catalog payout_tiers array if non-empty; else [{"tier":"Standard","amount":settlementAmount,"requirement":"See claim site"}]>,
+    "claimUrl":"<copy catalog claim_url verbatim; omit only if the catalog row has no claim_url>"
   }
 ]}
 
-Rules for lawsuits:
-- Include at most 8 lawsuits, only from the catalog, sorted by matchConfidence descending.
-- Use a generous match: product keywords (e.g. dry shampoo, sunscreen, baby powder, aerosol) can justify linking detected chemicals even when chemicals_involved is empty on the catalog row.
-- Omit lawsuits below 22 matchConfidence only if you have at least 3 stronger matches; otherwise include the best available matches down to 18 so the user is not left with zero lawsuits when the catalog is non-empty.
-- If the catalog is non-empty, you MUST return at least 1 lawsuit (the single best catalog row) unless there is absolutely no plausible string overlap between detected chemicals and any of title, eligible_products, product_category, chemicals_involved.
-- Never invent settlement amounts: use catalog fields.
-Rules for trials:
-- Include 2-5 plausible trials linked to the detected chemicals (may be synthetic but realistic).`;
+Rules:
+- Include at most 8 lawsuits, only from the catalog, sorted so every "product" match appears before any "chemical" match.
+- Only include a lawsuit if at least one detected token actually overlaps the catalog row's title, eligible_products, product_category, or chemicals_involved. Drop rows with no overlap entirely — never invent a connection.
+- Prefer "product" classification: if any detected token matches title / eligible_products / product_category, set matchType = "product". Use "chemical" ONLY when the match is purely against chemicals_involved.
+- Today's date is ${new Date().toISOString().slice(0, 10)}. Exclude any catalog row whose deadline is a valid ISO date strictly in the past. Keep rows with "TBD" / blank / pending deadlines.
+- Always copy the catalog row's claim_url verbatim into claimUrl when present.
+- Never invent settlement amounts: use catalog fields.`;
 }
 
 function buildFallbackPrompt(chemicals: string[]): string {
-  return `Given these hazardous chemicals a consumer was exposed to through retail products, find matching class action lawsuits and clinical trials.
+  return `Given these hazardous chemicals a consumer was exposed to through retail products, find matching class action lawsuits.
 
 Chemicals: ${chemicals.join(", ")}
 
 Return ONLY valid JSON (no markdown, no code fences):
-{"lawsuits":[{"id":"<id>","title":"<title>","defendant":"<company>","settlementAmount":"<amount>","deadline":"<YYYY-MM-DD or TBD>","status":"<active|pending|closed>","matchConfidence":<0-100>,"matchedChemicals":[<chemicals>],"matchedProducts":[<products>],"description":"<desc>","payoutTiers":[{"tier":"<name>","amount":"<range>","requirement":"<req>"}]}],"trials":[{"id":"<id>","title":"<title>","sponsor":"<pharma, prefer Regeneron>","molecule":"<drug>","phase":"<Phase 1-4>","condition":"<condition>","linkedChemicals":[<chemicals>],"eligibilityMatch":<0-100>,"locations":[<cities>],"status":"<recruiting|active>","description":"<desc including chemical-condition link>","nctId":"<NCT>","compensation":"<comp>"}]}
+{"lawsuits":[{"id":"<id>","title":"<title>","defendant":"<company>","settlementAmount":"<amount>","deadline":"<YYYY-MM-DD or TBD>","status":"<active|pending|closed>","matchType":"<'product' | 'chemical'>","matchedOn":[<specific tokens that matched, 1-4 items>],"matchedChemicals":[<chemicals>],"matchedProducts":[<products>],"description":"<desc>","payoutTiers":[{"tier":"<name>","amount":"<range>","requirement":"<req>"}],"claimUrl":"<official settlement site if known, else omit>"}]}
 
-Focus on real lawsuits and Regeneron clinical trials where possible.`;
+matchType rules: use "product" whenever the lawsuit's eligible-product list names something the user would plausibly have bought; use "chemical" only when the link is the ingredient alone. Sort lawsuits so every product match comes before any chemical match. Focus on real, active class action settlements.`;
 }
 
 Deno.serve(async (req) => {
@@ -195,20 +196,78 @@ Deno.serve(async (req) => {
 
     if (dbError) console.error("[match] settlements query error:", dbError.message);
 
-    const catalog = ((settlementRows ?? []).filter(Boolean)) as Record<string, unknown>[];
-    console.log(`[match] ${chemicals.length} chemicals, catalog size: ${catalog.length}, provider: gemini`);
+    const todayMs = (() => {
+      const d = new Date();
+      d.setUTCHours(0, 0, 0, 0);
+      return d.getTime();
+    })();
+    const deadlineStillOpen = (raw: unknown): boolean => {
+      if (raw == null) return true;
+      const s = String(raw).trim();
+      if (!s || s.toUpperCase() === "TBD") return true;
+      const ts = Date.parse(s);
+      if (Number.isNaN(ts)) return true;
+      return ts >= todayMs;
+    };
 
-    const prompt = catalog.length > 0
-      ? buildCatalogPrompt(chemicals, catalog)
+    const catalog = ((settlementRows ?? []).filter(Boolean)) as Record<string, unknown>[];
+    const originalCatalogSize = catalog.length;
+    const dateFiltered = catalog.filter((row) => deadlineStillOpen(row.deadline));
+
+    // Collapse duplicate catalog rows: prefer claim_url; fall back to (title | defendant).
+    // The scraper occasionally ingests the same claim twice under different Supabase IDs.
+    const dedupeKey = (row: Record<string, unknown>): string => {
+      const norm = (v: unknown) =>
+        String(v ?? "")
+          .toLowerCase()
+          .replace(/\s+/g, " ")
+          .replace(/[^a-z0-9 ]/g, "")
+          .trim();
+      const url = norm(row.claim_url).replace(/^https?/, "").replace(/\/$/, "");
+      if (url) return `u:${url}`;
+      return `td:${norm(row.title)}|${norm(row.defendant)}`;
+    };
+    const seenCatalog = new Map<string, Record<string, unknown>>();
+    for (const row of dateFiltered) {
+      const k = dedupeKey(row);
+      if (!seenCatalog.has(k)) seenCatalog.set(k, row);
+    }
+    const openCatalog = Array.from(seenCatalog.values());
+
+    console.log(
+      `[match] ${chemicals.length} chemicals, catalog size: ${openCatalog.length} (deduped from ${dateFiltered.length}, original ${originalCatalogSize}), provider: gemini`,
+    );
+
+    const prompt = openCatalog.length > 0
+      ? buildCatalogPrompt(chemicals, openCatalog)
       : buildFallbackPrompt(chemicals);
 
     const rawText = await callGemini(prompt, { label: "match", temperature: 0.25 });
     const opportunities = parseJsonWithRepair<Record<string, unknown>>(rawText, "match");
     opportunities._provider = "gemini";
 
-    const lawsuitArr = Array.isArray(opportunities.lawsuits) ? (opportunities.lawsuits as unknown[]) : [];
-    if (catalog.length > 0 && lawsuitArr.length === 0) {
-      opportunities.lawsuits = fallbackLawsuitsFromCatalog(catalog, chemicals);
+    const rawLawsuits = Array.isArray(opportunities.lawsuits) ? (opportunities.lawsuits as unknown[]) : [];
+    // Defensive: strip any LLM rows that slipped through with a passed deadline.
+    const dateKeptLawsuits = rawLawsuits.filter((l) => {
+      if (!l || typeof l !== "object") return false;
+      return deadlineStillOpen((l as Record<string, unknown>).deadline);
+    });
+    // Defensive: collapse duplicate lawsuits the LLM may have emitted twice.
+    const seenLawsuits = new Map<string, Record<string, unknown>>();
+    for (const l of dateKeptLawsuits) {
+      const row = l as Record<string, unknown>;
+      const k = dedupeKey({
+        claim_url: row.claimUrl,
+        title: row.title,
+        defendant: row.defendant,
+      });
+      if (!seenLawsuits.has(k)) seenLawsuits.set(k, row);
+    }
+    const lawsuitArr = Array.from(seenLawsuits.values());
+    opportunities.lawsuits = lawsuitArr;
+
+    if (openCatalog.length > 0 && lawsuitArr.length === 0) {
+      opportunities.lawsuits = fallbackLawsuitsFromCatalog(openCatalog, chemicals);
       opportunities._lawsuitFallback = "catalog_keyword_ranking";
       console.log(
         "[match] Gemini returned 0 lawsuits; applied catalog keyword fallback, count:",
@@ -216,11 +275,12 @@ Deno.serve(async (req) => {
       );
     }
 
+    // Drop any trials payload the LLM may still emit — trials feature is retired.
+    delete opportunities.trials;
+
     console.log(
       "[match] SUCCESS Lawsuits:",
       (opportunities.lawsuits as unknown[])?.length,
-      "Trials:",
-      (opportunities.trials as unknown[])?.length,
     );
 
     return corsJson(opportunities);
