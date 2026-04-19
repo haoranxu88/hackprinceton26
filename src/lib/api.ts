@@ -1,5 +1,17 @@
 import { supabase } from "@/integrations/supabase/client";
 
+const knotApiBaseUrl = import.meta.env.VITE_API_URL || "http://localhost:8000";
+
+async function parseJsonOrThrow(response: Response) {
+  const text = await response.text();
+  const data = text ? JSON.parse(text) : null;
+  if (!response.ok) {
+    const message = data?.error || data?.message || `Request failed with ${response.status}`;
+    throw new Error(message);
+  }
+  return data;
+}
+
 async function ensureAuth() {
   const { data: { session } } = await supabase.auth.getSession();
   if (session) return session;
@@ -37,6 +49,26 @@ async function invokeEdgeFunction(functionName: string, body: Record<string, unk
 
   console.log(`[api] ${functionName} success:`, JSON.stringify(data).slice(0, 300));
   return data;
+}
+
+export async function createKnotTransactionLinkSession(userId: string) {
+  const response = await fetch(`${knotApiBaseUrl}/api/knot/session`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ userId }),
+  });
+
+  return parseJsonOrThrow(response);
+}
+
+export async function listKnotTransactionLinkMerchants() {
+  const response = await fetch(`${knotApiBaseUrl}/api/knot/merchants?platform=web`);
+  return parseJsonOrThrow(response);
+}
+
+export async function getKnotBackendStatus() {
+  const response = await fetch(`${knotApiBaseUrl}/api/knot/status`);
+  return parseJsonOrThrow(response);
 }
 
 export async function listKnotMerchants() {

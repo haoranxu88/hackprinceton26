@@ -2,6 +2,7 @@
 	"type": "module",
 	"scripts": {
 		"dev": "vite",
+		"dev:backend": "node server/knot-server.mjs",
 		"build": "vite build",
 		"preview": "vite preview",
 		"ci": "pnpm install -frozen-lockfile"
@@ -17,7 +18,9 @@
 		"autoprefixer": "^10.5.0",
 		"class-variance-authority": "^0.7.1",
 		"clsx": "^2.1.1",
+		"dotenv": "^17.4.2",
 		"framer-motion": "^12.38.0",
+		"knotapi-js": "^1.0.6",
 		"lucide-react": "^1.8.0",
 		"react": "^19.2.5",
 		"react-dom": "^19.2.5",
