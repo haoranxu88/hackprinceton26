@@ -64,6 +64,16 @@ export function AnalysisStep({ transactions, onComplete }: AnalysisStepProps) {
         completedRef.current = true;
         onComplete(mockAnalysis, mockLawsuits, mockTrials);
       } else {
+        const startDrift = (from: number, to: number) => {
+          let current = from;
+          const id = setInterval(() => {
+            const remaining = to - current;
+            current += remaining * 0.04;
+            setProgress(current);
+          }, 200);
+          return () => { clearInterval(id); setProgress(to); };
+        };
+
         try {
           const allProducts = transactions.flatMap((t) =>
             (t.products || []).map((p) => ({
@@ -78,13 +88,15 @@ export function AnalysisStep({ transactions, onComplete }: AnalysisStepProps) {
             return;
           }
 
-          setStage(0); setProgress(15);
-          await new Promise((r) => setTimeout(r, 500));
-          setStage(1); setProgress(30);
+          setStage(0); setProgress(10);
+          await new Promise((r) => setTimeout(r, 400));
+          setStage(1); setProgress(15);
+          let stopDrift = startDrift(15, 55);
           const analysisResult = await analyzeExposure(allProducts);
+          stopDrift();
           if (analysisResult?._provider) setAiProvider(analysisResult._provider);
 
-          setStage(2); setProgress(60);
+          setStage(2); setProgress(58);
           const chemicals = analysisResult?.chemicals?.map((c: { chemical: string }) => c.chemical) ?? [];
 
           if (chemicals.length === 0) {
@@ -93,8 +105,11 @@ export function AnalysisStep({ transactions, onComplete }: AnalysisStepProps) {
             return;
           }
 
-          setStage(3); setProgress(80);
+          await new Promise((r) => setTimeout(r, 300));
+          setStage(3); setProgress(62);
+          stopDrift = startDrift(62, 95);
           const opportunities = await matchOpportunities(chemicals);
+          stopDrift();
           setProgress(100);
           completedRef.current = true;
           onComplete(
@@ -189,7 +204,7 @@ export function AnalysisStep({ transactions, onComplete }: AnalysisStepProps) {
           <Cpu className="w-3 h-3" />
           <span>
             Powered by{" "}
-            {aiProvider === "enter" ? "Enter AI" : aiProvider === "dedalus" ? "Dedalus Labs" : aiProvider === "gemini" ? "Gemini" : aiProvider}
+            {aiProvider === "dedalus" ? "Dedalus Labs" : aiProvider === "gemini" ? "Gemini 2.5 Flash" : aiProvider}
           </span>
         </div>
       )}

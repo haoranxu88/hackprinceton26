@@ -1,10 +1,18 @@
 import { supabase } from "@/integrations/supabase/client";
 
+/**
+ * Thin wrapper around Supabase Edge Functions.
+ * - Guarantees an anonymous session before invoking (functions require JWT).
+ * - Surfaces structured error bodies when the function returns a non-2xx.
+ * - Logging is minimal in production; set VITE_DEBUG_API=true to get full traces.
+ */
+
+const DEBUG = import.meta.env.VITE_DEBUG_API === "true";
+
 async function ensureAuth() {
   const { data: { session } } = await supabase.auth.getSession();
   if (session) return session;
 
-  console.log("[api] No session, signing in anonymously...");
   const { data, error } = await supabase.auth.signInAnonymously();
   if (error) {
     console.error("[api] Anonymous auth failed:", error.message);
@@ -13,31 +21,33 @@ async function ensureAuth() {
   return data.session;
 }
 
-async function invokeEdgeFunction(functionName: string, body: Record<string, unknown>) {
+async function invokeEdgeFunction<T = unknown>(
+  functionName: string,
+  body: Record<string, unknown>,
+): Promise<T> {
   await ensureAuth();
 
-  console.log(`[api] Invoking ${functionName}`, JSON.stringify(body).slice(0, 200));
+  if (DEBUG) console.log(`[api] Invoking ${functionName}`, JSON.stringify(body).slice(0, 200));
   const { data, error } = await supabase.functions.invoke(functionName, { body });
 
   if (error) {
-    // Try to extract the response body from the error context
-    let errorDetail = null;
+    let errorDetail: unknown = null;
     try {
-      if (error.context && typeof error.context.json === "function") {
-        errorDetail = await error.context.json();
-      } else if (error.context && typeof error.context.text === "function") {
-        errorDetail = await error.context.text();
-      }
-    } catch (_) { /* ignore */ }
-    
+      const ctx = (error as { context?: { json?: () => Promise<unknown>; text?: () => Promise<string> } }).context;
+      if (ctx?.json) errorDetail = await ctx.json();
+      else if (ctx?.text) errorDetail = await ctx.text();
+    } catch { /* swallow */ }
+
     console.error(`[api] ${functionName} error:`, error);
-    console.error(`[api] ${functionName} error detail:`, errorDetail ?? data ?? "no detail");
+    if (errorDetail) console.error(`[api] ${functionName} detail:`, errorDetail);
     throw error;
   }
 
-  console.log(`[api] ${functionName} success:`, JSON.stringify(data).slice(0, 300));
-  return data;
+  if (DEBUG) console.log(`[api] ${functionName} success:`, JSON.stringify(data).slice(0, 300));
+  return data as T;
 }
+
+// ---------- Knot (TransactionLink) ----------
 
 export async function listKnotMerchants() {
   return invokeEdgeFunction("knot-proxy", { action: "list-merchants" });
@@ -51,6 +61,8 @@ export async function syncKnotTransactions(userId: string, merchantId: number) {
   return invokeEdgeFunction("knot-proxy", { action: "sync-transactions", userId, merchantId });
 }
 
+// ---------- AI analysis ----------
+
 export async function analyzeExposure(products: { name: string; description: string }[]) {
   return invokeEdgeFunction("analyze-exposure", { products });
 }
@@ -59,6 +71,14 @@ export async function matchOpportunities(chemicals: string[]) {
   return invokeEdgeFunction("match-opportunities", { chemicals });
 }
 
+// ---------- Settlement pipeline ----------
+
+/** Manual kick: run discover then enrich. Cron runs these automatically every 4h / 1h. */
+export async function scrapeSettlements() {
+  return invokeEdgeFunction("scrape-settlements", {});
+}
+
+/** Alternate LLM provider (Dedalus, OpenAI-compatible). Drop-in swap if Gemini is down. */
 export async function dedalusAgent(task: "analyze" | "match", data: Record<string, unknown>) {
   return invokeEdgeFunction("dedalus-agent", { task, data });
 }

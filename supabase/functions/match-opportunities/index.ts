@@ -1,92 +1,167 @@
+import { corsJson, handlePreflight } from "../_shared/cors.ts";
+import { callGemini, parseJsonWithRepair } from "../_shared/gemini.ts";
+import { getServiceClient } from "../_shared/supabase.ts";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+/**
+ * POST /match-opportunities
+ * Body: { chemicals: string[] }
+ *
+ * Strategy:
+ * 1. Pull enriched settlements from the curated `settlements` table.
+ * 2. Ask Gemini to score / narrate matches ONLY from that catalog.
+ * 3. If Gemini whiffs (returns zero lawsuits), fall back to a deterministic
+ *    keyword ranker so users always see relevant catalog rows.
+ *
+ * Clinical trials remain LLM-generated because payout specificity matters less.
+ */
 
-// === AI PROVIDER CONFIG ===
-// Options: "enter" (default), "gemini", "dedalus"
-const AI_PROVIDER = "enter";
-// ==========================
-
-async function callEnterAI(prompt: string): Promise<string> {
-  const token = Deno.env.get("AI_API_TOKEN_f11936aa39dd");
-  if (!token) throw new Error("AI_API_TOKEN not configured");
-  console.log("[match] Using Enter AI");
-  const response = await fetch("https://api.enter.pro/code/api/v1/ai/messages", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: "anthropic/claude-sonnet-4.5",
-      messages: [{ role: "user", content: prompt }],
-      stream: false, max_tokens: 4096, temperature: 0.3,
-    }),
-  });
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`Enter AI ${response.status}: ${errText.slice(0, 200)}`);
-  }
-  const data = await response.json();
-  return data.content?.[0]?.text || (() => { throw new Error("Empty Enter AI response"); })();
+function normChem(s: string): string {
+  return s.trim().toLowerCase();
 }
 
-async function callGemini(prompt: string): Promise<string> {
-  const geminiKey = Deno.env.get("GEMINI_API_KEY");
-  if (!geminiKey) throw new Error("GEMINI_API_KEY not configured");
-  console.log("[match] Using Gemini");
-  const url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    const resp = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-goog-api-key": geminiKey },
-      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.3, maxOutputTokens: 4096 } }),
-    });
-    if (resp.status === 429 && attempt < 3) { await new Promise(r => setTimeout(r, attempt * 5000)); continue; }
-    const text = await resp.text();
-    if (!resp.ok) throw new Error(`Gemini ${resp.status}: ${text.slice(0, 200)}`);
-    const data = JSON.parse(text);
-    return data.candidates?.[0]?.content?.parts?.[0]?.text || (() => { throw new Error("Empty Gemini response"); })();
-  }
-  throw new Error("Gemini max retries exceeded");
-}
+/** Deterministic overlap score when the LLM returns no lawsuits. */
+function scoreCatalogRow(row: Record<string, unknown>, chemicals: string[]): number {
+  const tokens = chemicals.map(normChem).filter(Boolean);
+  if (!tokens.length) return 0;
 
-async function callDedalus(prompt: string): Promise<string> {
-  const apiKey = Deno.env.get("DEDALUS_API_KEY");
-  if (!apiKey) throw new Error("DEDALUS_API_KEY not configured");
-  console.log("[match] Using Dedalus");
-  const response = await fetch("https://api.dedaluslabs.ai/v1/chat/completions", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-API-Key": apiKey },
-    body: JSON.stringify({
-      model: "openai/gpt-4o-mini",
-      messages: [
-        { role: "system", content: "You are a legal and clinical trial matching expert. Return only valid JSON." },
-        { role: "user", content: prompt },
-      ],
-      temperature: 0.3, max_tokens: 4096,
-    }),
-  });
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`Dedalus ${response.status}: ${errText.slice(0, 200)}`);
-  }
-  const data = await response.json();
-  return data.choices?.[0]?.message?.content || (() => { throw new Error("Empty Dedalus response"); })();
-}
+  const involved = Array.isArray(row.chemicals_involved)
+    ? (row.chemicals_involved as unknown[]).map((c) => normChem(String(c))).filter(Boolean)
+    : [];
 
-Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  const hay = [
+    row.title,
+    row.defendant,
+    row.product_category,
+    row.eligible_products,
+    involved.join(" "),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
 
-  try {
-    const { chemicals } = await req.json();
-    if (!chemicals?.length) {
-      return new Response(JSON.stringify({ error: "No chemicals provided" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  let score = 0;
+  for (const t of tokens) {
+    if (!t) continue;
+    if (involved.some((i) => i === t || i.includes(t) || t.includes(i))) score += 42;
+    else if (hay.includes(t)) score += 22;
+    else {
+      const parts = t.split(/[^a-z0-9]+/).filter((p) => p.length >= 4);
+      for (const p of parts) {
+        if (hay.includes(p)) score += 12;
+      }
     }
+  }
+  return Math.min(100, score);
+}
 
-    console.log(`[match] ${chemicals.length} chemicals, provider: ${AI_PROVIDER}`);
+function fallbackLawsuitsFromCatalog(
+  catalog: Record<string, unknown>[],
+  chemicals: string[],
+  max = 8,
+): Record<string, unknown>[] {
+  const scored = catalog
+    .map((row) => ({ row, score: scoreCatalogRow(row, chemicals) }))
+    .sort((a, b) => b.score - a.score);
 
-    const prompt = `Given these hazardous chemicals a consumer was exposed to through retail products, find matching class action lawsuits and clinical trials.
+  const strong = scored.filter((s) => s.score >= 8).slice(0, max);
+  const picked = strong.length > 0 ? strong : scored.slice(0, Math.min(5, scored.length));
+
+  return picked.map(({ row, score }) => {
+    const payout = row.payout_estimate != null ? String(row.payout_estimate) : "Unknown";
+    const tiers = Array.isArray(row.payout_tiers) && (row.payout_tiers as unknown[]).length
+      ? row.payout_tiers
+      : [{ tier: "Standard", amount: payout, requirement: "See claim site" }];
+
+    const conf = score >= 28 ? score : Math.min(44, 26 + Math.round(score / 2));
+
+    const matched = chemicals.filter((c) => {
+      const t = normChem(c);
+      const inv = Array.isArray(row.chemicals_involved)
+        ? (row.chemicals_involved as unknown[]).map((x) => normChem(String(x)))
+        : [];
+      const hay = `${row.title} ${row.defendant} ${row.eligible_products} ${row.product_category}`.toLowerCase();
+      return inv.some((i) => i.includes(t) || t.includes(i)) || hay.includes(t);
+    });
+
+    return {
+      id: row.id,
+      title: String(row.title ?? ""),
+      defendant: String(row.defendant ?? ""),
+      settlementAmount: payout,
+      deadline: row.deadline != null ? String(row.deadline) : "TBD",
+      status: String(row.status ?? "active"),
+      matchConfidence: conf,
+      matchedChemicals: matched.length ? matched : chemicals.slice(0, 2),
+      matchedProducts: String(row.eligible_products ?? "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .slice(0, 4),
+      description:
+        score >= 12
+          ? "Matched from curated settlement catalog based on chemical or product keywords in the listing."
+          : "Broad catalog match — confirm chemicals and products against the official claim notice.",
+      payoutTiers: tiers,
+    };
+  });
+}
+
+function buildCatalogPrompt(chemicals: string[], catalog: Record<string, unknown>[]): string {
+  const catalogJson = JSON.stringify(catalog).slice(0, 95_000);
+  return `You match detected consumer-product chemicals to known class action settlements and suggest clinical trials.
+
+Detected chemicals (from purchase history / exposure scan):
+${chemicals.join(", ")}
+
+Settlement catalog (JSON array from our database — use ONLY these entries for lawsuits; each has id, defendant, title, payout_estimate, deadline, eligible_products, chemicals_involved, payout_tiers, claim_url, proof_required):
+${catalogJson}
+
+Return ONLY valid JSON (no markdown, no code fences):
+{"lawsuits":[
+  {
+    "id":"<must equal one of the catalog id values>",
+    "title":"<from catalog title, lightly edited for clarity>",
+    "defendant":"<from catalog>",
+    "settlementAmount":"<use catalog payout_estimate verbatim when possible>",
+    "deadline":"<from catalog deadline; use TBD if empty>",
+    "status":"<active|pending|closed> — prefer active from catalog status",
+    "matchConfidence":<0-100 based on overlap between detected chemicals and catalog.chemicals_involved / eligible_products>,
+    "matchedChemicals":[<subset of detected chemicals that justify the match>],
+    "matchedProducts":[<short product keywords inferred from eligible_products, 1-4 items>],
+    "description":"<one sentence tying user's chemicals to this settlement>",
+    "payoutTiers": <copy catalog payout_tiers array if non-empty; else [{"tier":"Standard","amount":settlementAmount,"requirement":"See claim site"}]>
+  }
+],
+"trials":[
+  {
+    "id":"<id>",
+    "title":"<title>",
+    "sponsor":"<pharma>",
+    "molecule":"<drug>",
+    "phase":"<Phase 1-4>",
+    "condition":"<condition>",
+    "linkedChemicals":[<chemicals>],
+    "eligibilityMatch":<0-100>,
+    "locations":[<cities>],
+    "status":"<recruiting|active>",
+    "description":"<desc>",
+    "nctId":"<NCT>",
+    "compensation":"<comp>"
+  }
+]}
+
+Rules for lawsuits:
+- Include at most 8 lawsuits, only from the catalog, sorted by matchConfidence descending.
+- Use a generous match: product keywords (e.g. dry shampoo, sunscreen, baby powder, aerosol) can justify linking detected chemicals even when chemicals_involved is empty on the catalog row.
+- Omit lawsuits below 22 matchConfidence only if you have at least 3 stronger matches; otherwise include the best available matches down to 18 so the user is not left with zero lawsuits when the catalog is non-empty.
+- If the catalog is non-empty, you MUST return at least 1 lawsuit (the single best catalog row) unless there is absolutely no plausible string overlap between detected chemicals and any of title, eligible_products, product_category, chemicals_involved.
+- Never invent settlement amounts: use catalog fields.
+Rules for trials:
+- Include 2-5 plausible trials linked to the detected chemicals (may be synthetic but realistic).`;
+}
+
+function buildFallbackPrompt(chemicals: string[]): string {
+  return `Given these hazardous chemicals a consumer was exposed to through retail products, find matching class action lawsuits and clinical trials.
 
 Chemicals: ${chemicals.join(", ")}
 
@@ -94,22 +169,64 @@ Return ONLY valid JSON (no markdown, no code fences):
 {"lawsuits":[{"id":"<id>","title":"<title>","defendant":"<company>","settlementAmount":"<amount>","deadline":"<YYYY-MM-DD or TBD>","status":"<active|pending|closed>","matchConfidence":<0-100>,"matchedChemicals":[<chemicals>],"matchedProducts":[<products>],"description":"<desc>","payoutTiers":[{"tier":"<name>","amount":"<range>","requirement":"<req>"}]}],"trials":[{"id":"<id>","title":"<title>","sponsor":"<pharma, prefer Regeneron>","molecule":"<drug>","phase":"<Phase 1-4>","condition":"<condition>","linkedChemicals":[<chemicals>],"eligibilityMatch":<0-100>,"locations":[<cities>],"status":"<recruiting|active>","description":"<desc including chemical-condition link>","nctId":"<NCT>","compensation":"<comp>"}]}
 
 Focus on real lawsuits and Regeneron clinical trials where possible.`;
+}
 
-    const callProvider = { enter: callEnterAI, gemini: callGemini, dedalus: callDedalus }[AI_PROVIDER];
-    if (!callProvider) throw new Error(`Unknown provider: ${AI_PROVIDER}`);
+Deno.serve(async (req) => {
+  const pre = handlePreflight(req);
+  if (pre) return pre;
 
-    const rawText = await callProvider(prompt);
-    const cleanJson = rawText.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-    const opportunities = JSON.parse(cleanJson);
-    opportunities._provider = AI_PROVIDER;
-    console.log("[match] SUCCESS Lawsuits:", opportunities.lawsuits?.length, "Trials:", opportunities.trials?.length);
+  try {
+    const { chemicals } = await req.json();
+    if (!chemicals?.length) {
+      return corsJson({ error: "No chemicals provided" }, { status: 400 });
+    }
 
-    return new Response(JSON.stringify(opportunities), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    const supabase = getServiceClient();
+
+    const { data: settlementRows, error: dbError } = await supabase
+      .from("settlements")
+      .select(
+        "id,defendant,title,product_category,eligible_products,chemicals_involved,deadline,payout_estimate,proof_required,claim_url,status,payout_tiers",
+      )
+      .eq("status", "active")
+      .eq("enrichment_status", "enriched")
+      .order("scraped_at", { ascending: false })
+      .limit(45);
+
+    if (dbError) console.error("[match] settlements query error:", dbError.message);
+
+    const catalog = ((settlementRows ?? []).filter(Boolean)) as Record<string, unknown>[];
+    console.log(`[match] ${chemicals.length} chemicals, catalog size: ${catalog.length}, provider: gemini`);
+
+    const prompt = catalog.length > 0
+      ? buildCatalogPrompt(chemicals, catalog)
+      : buildFallbackPrompt(chemicals);
+
+    const rawText = await callGemini(prompt, { label: "match", temperature: 0.25 });
+    const opportunities = parseJsonWithRepair<Record<string, unknown>>(rawText, "match");
+    opportunities._provider = "gemini";
+
+    const lawsuitArr = Array.isArray(opportunities.lawsuits) ? (opportunities.lawsuits as unknown[]) : [];
+    if (catalog.length > 0 && lawsuitArr.length === 0) {
+      opportunities.lawsuits = fallbackLawsuitsFromCatalog(catalog, chemicals);
+      opportunities._lawsuitFallback = "catalog_keyword_ranking";
+      console.log(
+        "[match] Gemini returned 0 lawsuits; applied catalog keyword fallback, count:",
+        (opportunities.lawsuits as unknown[])?.length,
+      );
+    }
+
+    console.log(
+      "[match] SUCCESS Lawsuits:",
+      (opportunities.lawsuits as unknown[])?.length,
+      "Trials:",
+      (opportunities.trials as unknown[])?.length,
+    );
+
+    return corsJson(opportunities);
   } catch (error) {
-    console.error("[match] CRASH:", error.message);
-    return new Response(JSON.stringify({ error: error.message }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error("[match] CRASH:", msg);
+    return corsJson({ error: msg }, { status: 500 });
   }
 });
