@@ -58,8 +58,9 @@ export async function callGemini(prompt: string, opts: GeminiOptions = {}): Prom
     label = "gemini",
   } = opts;
 
-  const url =
-    "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
+  const url = "https://generativelanguage.googleapis.com/v1beta/models/gemma-4-31b-it:generateContent";
+  // const url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent";
+    // "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
 
   for (let attempt = 1; attempt <= retries; attempt++) {
     const resp = await fetch(url, {

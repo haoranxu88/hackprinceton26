@@ -1,1 +1,4 @@
 project_id = "lshvzcfhzdpludpwprjv"
+
+[functions.chemical-health-effects]
+verify_jwt = false
