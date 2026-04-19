@@ -87,3 +87,94 @@ export function getRiskColor(level: string): string {
     default: return "hsl(222, 8%, 46%)";
   }
 }
+
+const CATEGORY_WEIGHT: Record<string, number> = {
+  carcinogen: 4.0,
+  endocrine_disruptor: 2.5,
+  neurotoxin: 2.0,
+  irritant: 1.0,
+};
+
+/**
+ * Per-chemical exposure score — the same ADD math used for Toxic Load but
+ * returned un-aggregated so we can rank conditions against each other.
+ * Unit is "risk points per person per day", scaled ×1e6 for readability.
+ */
+export function chemicalExposureScore(chem: ChemicalExposure): number {
+  const daEvent = calculateDAEvent(chem.kp, chem.concentrationPpm, chem.contactTimeHrs);
+  const add = calculateADD(daEvent, chem.frequency);
+  const categoryWeight = CATEGORY_WEIGHT[chem.category] ?? 1.0;
+  return add * categoryWeight * 1_000_000;
+}
+
+export interface ConditionRisk {
+  condition: string;
+  score: number;
+  /** The chemical contributing the largest share of the score. */
+  driver: ChemicalExposure;
+  /** All chemicals flagged for this condition, sorted by descending contribution. */
+  contributors: ChemicalExposure[];
+  riskLevel: "safe" | "moderate" | "high" | "critical";
+}
+
+/**
+ * Rank the distinct health conditions a user is facing by the actual exposure
+ * driving each condition — rather than treating a moderate deodorant and a
+ * critical dry-shampoo benzene spike as equivalent risks.
+ *
+ * Scoring rule per condition:
+ *   score = max( chemicalExposureScore(c) for c in chemicals that cause the condition )
+ * We take max (not sum) so a single critical driver dominates correctly; then
+ * we surface every contributor so the user sees *why* that condition is top.
+ */
+export function rankConditionsByExposure(
+  chemicals: ChemicalExposure[],
+  healthEffects: { chemical: string; conditions: string[] }[],
+  limit = 3,
+): ConditionRisk[] {
+  const chemByName = new Map<string, ChemicalExposure>();
+  for (const c of chemicals) {
+    chemByName.set(c.chemical.trim().toLowerCase(), c);
+  }
+
+  // condition -> { contributors: chemical -> score }
+  const perCondition = new Map<string, Map<string, number>>();
+
+  for (const { chemical, conditions } of healthEffects) {
+    const key = chemical.trim().toLowerCase();
+    const chem = chemByName.get(key);
+    if (!chem) continue;
+    const score = chemicalExposureScore(chem);
+    if (!Number.isFinite(score) || score <= 0) continue;
+    for (const rawCondition of conditions ?? []) {
+      const condition = rawCondition.trim();
+      if (!condition) continue;
+      const inner = perCondition.get(condition) ?? new Map<string, number>();
+      const existing = inner.get(chem.chemical) ?? 0;
+      if (score > existing) inner.set(chem.chemical, score);
+      perCondition.set(condition, inner);
+    }
+  }
+
+  const ranked: ConditionRisk[] = [];
+  for (const [condition, inner] of perCondition) {
+    const sorted = [...inner.entries()].sort((a, b) => b[1] - a[1]);
+    if (sorted.length === 0) continue;
+    const topScore = sorted[0][1];
+    const contributors = sorted
+      .map(([name]) => chemByName.get(name.trim().toLowerCase()))
+      .filter((c): c is ChemicalExposure => !!c);
+    const driver = contributors[0];
+    if (!driver) continue;
+    ranked.push({
+      condition,
+      score: topScore,
+      driver,
+      contributors,
+      riskLevel: driver.riskLevel,
+    });
+  }
+
+  ranked.sort((a, b) => b.score - a.score);
+  return ranked.slice(0, limit);
+}

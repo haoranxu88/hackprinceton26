@@ -1,3 +1,5 @@
+export type LawsuitMatchType = "product" | "chemical";
+
 export interface Lawsuit {
   id: string;
   title: string;
@@ -5,7 +7,14 @@ export interface Lawsuit {
   settlementAmount: string;
   deadline: string;
   status: "active" | "pending" | "closed";
-  matchConfidence: number;
+  /**
+   * How this lawsuit matched the user's profile:
+   * - "product"  : an eligible product named in the settlement overlaps a purchased item (stronger)
+   * - "chemical" : only the chemical/ingredient overlaps (weaker)
+   */
+  matchType: LawsuitMatchType;
+  /** The specific product or chemical tokens that triggered the match. */
+  matchedOn: string[];
   matchedChemicals: string[];
   matchedProducts: string[];
   description: string;
@@ -21,7 +30,8 @@ export const mockLawsuits: Lawsuit[] = [
     settlementAmount: "$3,600,000",
     deadline: "2026-08-15",
     status: "active",
-    matchConfidence: 94,
+    matchType: "product",
+    matchedOn: ["TRESemme Dry Shampoo Fresh & Clean"],
     matchedChemicals: ["Benzene"],
     matchedProducts: ["TRESemme Dry Shampoo Fresh & Clean"],
     description: "Class action settlement for dry shampoo products found to contain elevated levels of benzene, a known carcinogen. Affects products manufactured between 2020-2023.",
@@ -39,7 +49,8 @@ export const mockLawsuits: Lawsuit[] = [
     settlementAmount: "$8,900,000,000",
     deadline: "2026-10-30",
     status: "active",
-    matchConfidence: 89,
+    matchType: "product",
+    matchedOn: ["Johnson's Baby Powder Original"],
     matchedChemicals: ["Talc (Asbestos-contaminated)"],
     matchedProducts: ["Johnson's Baby Powder Original"],
     description: "Multidistrict litigation alleging that J&J talc-based baby powder contained asbestos and caused ovarian cancer and mesothelioma in users.",
@@ -57,7 +68,11 @@ export const mockLawsuits: Lawsuit[] = [
     settlementAmount: "$45,000,000",
     deadline: "2026-06-01",
     status: "active",
-    matchConfidence: 91,
+    matchType: "product",
+    matchedOn: [
+      "Neutrogena Beach Defense Sunscreen Spray",
+      "Banana Boat Sport Ultra SPF 50",
+    ],
     matchedChemicals: ["Benzene", "Oxybenzone (BP-3)"],
     matchedProducts: [
       "Neutrogena Beach Defense Sunscreen Spray",
@@ -78,7 +93,8 @@ export const mockLawsuits: Lawsuit[] = [
     settlementAmount: "Pending",
     deadline: "TBD",
     status: "pending",
-    matchConfidence: 72,
+    matchType: "chemical",
+    matchedOn: ["Formaldehyde"],
     matchedChemicals: ["Formaldehyde"],
     matchedProducts: ["OGX Biotin & Collagen Shampoo", "Garnier Fructis Style Full Control Hairspray"],
     description: "Emerging litigation for hair care products containing formaldehyde-releasing preservatives linked to cancer risk, particularly among frequent users.",

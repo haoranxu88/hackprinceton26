@@ -151,6 +151,8 @@ Deno.serve(async (req) => {
       const userId = String(body.userId || body.external_user_id || "");
       const merchantId = Number(body.merchantId ?? body.merchant_id);
       const limit = Number(body.limit ?? 100);
+      const resetCursor =
+        body.reset_cursor === true || body.resetCursor === true || body.reset_sync === true;
 
       if (!userId || !Number.isFinite(merchantId)) {
         return jsonResponse(400, {
@@ -159,6 +161,19 @@ Deno.serve(async (req) => {
       }
 
       const supabase = getServiceClient();
+
+      if (resetCursor) {
+        const { error: delErr } = await supabase
+          .from("knot_sync_cursors")
+          .delete()
+          .eq("external_user_id", userId)
+          .eq("merchant_id", merchantId);
+        if (delErr) {
+          console.warn("[knot-proxy] reset_cursor delete failed:", delErr.message);
+        } else {
+          console.log(`[knot-proxy] reset_cursor for user=${userId} merchant=${merchantId}`);
+        }
+      }
 
       // Resume from stored cursor so retries don't re-fetch the whole account.
       const { data: cursorRow } = await supabase

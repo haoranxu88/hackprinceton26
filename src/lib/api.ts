@@ -1,4 +1,4 @@
-import { supabase } from "@/integrations/supabase/client";
+import { supabase, SUPABASE_ANON_KEY } from "@/integrations/supabase/client";
 
 /**
  * Thin wrapper around Supabase Edge Functions.
@@ -9,26 +9,15 @@ import { supabase } from "@/integrations/supabase/client";
 
 const DEBUG = import.meta.env.VITE_DEBUG_API === "true";
 
-async function ensureAuth() {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (session) return session;
-
-  const { data, error } = await supabase.auth.signInAnonymously();
-  if (error) {
-    console.error("[api] Anonymous auth failed:", error.message);
-    return null;
-  }
-  return data.session;
-}
-
 async function invokeEdgeFunction<T = unknown>(
   functionName: string,
   body: Record<string, unknown>,
 ): Promise<T> {
-  await ensureAuth();
-
   if (DEBUG) console.log(`[api] Invoking ${functionName}`, JSON.stringify(body).slice(0, 200));
-  const { data, error } = await supabase.functions.invoke(functionName, { body });
+  const { data, error } = await supabase.functions.invoke(functionName, {
+    body,
+    headers: { Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
+  });
 
   if (error) {
     let errorDetail: unknown = null;
@@ -40,7 +29,24 @@ async function invokeEdgeFunction<T = unknown>(
 
     console.error(`[api] ${functionName} error:`, error);
     if (errorDetail) console.error(`[api] ${functionName} detail:`, errorDetail);
-    throw error;
+
+    const fromBody =
+      errorDetail &&
+      typeof errorDetail === "object" &&
+      "error" in errorDetail &&
+      typeof (errorDetail as { error: unknown }).error === "string"
+        ? (errorDetail as { error: string }).error
+        : null;
+    const details =
+      errorDetail &&
+      typeof errorDetail === "object" &&
+      "details" in errorDetail
+        ? JSON.stringify((errorDetail as { details: unknown }).details).slice(0, 400)
+        : null;
+    const message = [fromBody, details].filter(Boolean).join(" — ") || error.message;
+    const wrapped = new Error(`${functionName}: ${message}`);
+    (wrapped as Error & { cause?: unknown }).cause = error;
+    throw wrapped;
   }
 
   if (DEBUG) console.log(`[api] ${functionName} success:`, JSON.stringify(data).slice(0, 300));
@@ -140,12 +146,22 @@ export async function createKnotTransactionLinkSession(userId: string) {
   });
 }
 
-export async function syncKnotTransactions(userId: string, merchantId: number, limit: number = 100) {
+/**
+ * @param resetCursor When true, clears the stored Knot pagination cursor first.
+ *   Use after a fresh link or when a prior sync left the account stuck at 0 rows.
+ */
+export async function syncKnotTransactions(
+  userId: string,
+  merchantId: number,
+  limit: number = 100,
+  resetCursor = false,
+) {
   return invokeEdgeFunction<KnotSyncResponse>("knot-proxy", {
     action: "sync-transactions",
     userId,
     merchantId,
     limit,
+    ...(resetCursor ? { reset_cursor: true } : {}),
   });
 }
 
@@ -180,8 +196,8 @@ export async function analyzeExposure(products: { name: string; description: str
   return invokeEdgeFunction("analyze-exposure", { products });
 }
 
-export async function matchOpportunities(chemicals: string[]) {
-  return invokeEdgeFunction("match-opportunities", { chemicals });
+export async function matchOpportunities(chemicals: string[], products?: string[]) {
+  return invokeEdgeFunction("match-opportunities", { chemicals, products });
 }
 
 export async function getChemicalHealthEffects(chemicals: string[]) {
@@ -203,12 +219,34 @@ export async function dedalusAgent(task: "analyze" | "match", data: Record<strin
   return invokeEdgeFunction("dedalus-agent", { task, data });
 }
 
+export interface SendClaimReceiptEmailItem {
+  name: string;
+  external_id?: string;
+  quantity?: number;
+  unit_price?: string | number;
+  total_price?: string | number;
+}
+
+export interface SendClaimReceiptEmailPayload {
+  emailId: string;
+  lawsuitTitle: string;
+  lawsuitDefendant?: string;
+  lawsuitClaimUrl?: string;
+  merchant: string;
+  transactionId: string;
+  transactionDate: string;
+  matchedItems: SendClaimReceiptEmailItem[];
+  allItems: SendClaimReceiptEmailItem[];
+  /** Plain base64 (no data URI prefix) of the PDF to attach. */
+  pdfBase64: string;
+  pdfFileName?: string;
+  userName?: string;
+}
+
 /**
- * Send a receipt email via Resend.
- * @param image  - A public image URL or base64 data URL (e.g. "data:image/png;base64,...")
- * @param userName - Recipient's display name
- * @param emailId  - Recipient's email address
+ * Send a claim-receipt email via Resend with the generated PDF attached.
+ * Edge function: `send-receipt-email`. Requires RESEND_API_KEY to be set on the function.
  */
-export async function sendReceiptEmail(image: string, userName: string, emailId: string) {
-  return invokeEdgeFunction("send-receipt-email", { image, userName, emailId });
+export async function sendClaimReceiptEmail(payload: SendClaimReceiptEmailPayload) {
+  return invokeEdgeFunction("send-receipt-email", payload as unknown as Record<string, unknown>);
 }

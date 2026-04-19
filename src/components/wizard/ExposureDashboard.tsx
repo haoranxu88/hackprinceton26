@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { ChemicalBreakdown } from "@/components/exposure/ChemicalBreakdown";
 import { ProductTimeline } from "@/components/exposure/ProductTimeline";
 import { RiskCategories } from "@/components/exposure/RiskCategories";
+import { TopRiskConditions } from "@/components/exposure/TopRiskConditions";
 import type { ExposureAnalysis } from "@/data/mock-analysis";
 import type { Transaction } from "@/data/mock-transactions";
 import { ArrowRight, ArrowLeft, AlertTriangle } from "lucide-react";
@@ -137,11 +138,16 @@ export function ExposureDashboard({ analysis, transactions, onNext, onBack }: Ex
         </motion.div>
       </div>
 
-      {/* What these chemicals can cause */}
+      {/* Top-3 conditions ranked by actual exposure dose */}
       <motion.div variants={fadeUp} className="mb-10">
-        <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-4">
-          What These Chemicals Can Cause
-        </p>
+        <div className="flex items-baseline justify-between mb-4">
+          <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+            Top 3 Conditions You're Most At Risk For
+          </p>
+          <p className="text-[10px] text-muted-foreground/70">
+            weighted by ppm × exposure
+          </p>
+        </div>
         {healthEffectsLoading && (
           <div className="flex items-center gap-2 text-sm text-muted-foreground py-4">
             <span className="inline-block w-3 h-3 rounded-full bg-muted-foreground/30 animate-pulse" />
@@ -155,7 +161,18 @@ export function ExposureDashboard({ analysis, transactions, onNext, onBack }: Ex
           </div>
         )}
         {!healthEffectsLoading && !healthEffectsError && healthEffects && (
-          <div className="space-y-4">
+          <TopRiskConditions chemicals={analysis.chemicals} healthEffects={healthEffects} />
+        )}
+      </motion.div>
+
+      {/* Full per-chemical reference (collapsed below the prioritized view) */}
+      {!healthEffectsLoading && !healthEffectsError && healthEffects && healthEffects.length > 0 && (
+        <motion.details variants={fadeUp} className="mb-10 group">
+          <summary className="cursor-pointer text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-4 hover:text-foreground transition-colors list-none flex items-center gap-2">
+            <span className="inline-block w-2 h-2 border-r border-b border-current rotate-[-45deg] group-open:rotate-45 transition-transform" />
+            Show all detected conditions per chemical ({healthEffects.length})
+          </summary>
+          <div className="space-y-4 mt-4">
             {healthEffects.map(({ chemical, conditions }) => (
               <div key={chemical} className="rounded-lg border border-border bg-muted/20 px-4 py-3">
                 <p className="text-sm font-semibold text-foreground mb-2">{chemical}</p>
@@ -172,8 +189,8 @@ export function ExposureDashboard({ analysis, transactions, onNext, onBack }: Ex
               </div>
             ))}
           </div>
-        )}
-      </motion.div>
+        </motion.details>
+      )}
 
       {/* Navigation */}
       <motion.div variants={fadeUp} className="flex items-center gap-4 pt-4 border-t border-border">

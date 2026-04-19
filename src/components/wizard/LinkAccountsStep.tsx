@@ -9,11 +9,12 @@ import {
   getKnotBackendStatus,
   getKnotTransactions,
   listKnotTransactionLinkMerchants,
+  syncKnotTransactions,
   type KnotAccountRow,
   type KnotMerchant,
   type KnotTransactionRow,
 } from "@/lib/api";
-import type { Transaction } from "@/data/mock-transactions";
+import { mockTransactions, type Transaction } from "@/data/mock-transactions";
 import {
   ShoppingBag,
   Store,
@@ -37,8 +38,8 @@ interface DisplayMerchant {
 
 /**
  * pending  = SDK modal is open, user has NOT yet authenticated
- * syncing  = AUTHENTICATED received, webhook-driven sync in flight (polling DB)
- * connected = AUTHENTICATED received (transactions may still be arriving)
+ * syncing  = auth succeeded; knot-proxy sync + DB poll in flight
+ * connected = at least one transaction row observed for this merchant
  */
 type MerchantConnectionState = "connected" | "pending" | "syncing";
 
@@ -191,10 +192,31 @@ export function LinkAccountsStep({ onNext, onBack }: LinkAccountsStepProps) {
         knotMerchantId: t.id,
         name: live?.name ? String(live.name) : t.name,
         subtitle: t.subtitle,
-        available: Boolean(live),
+        // In demo/mock mode, every merchant is "available" so the Connect flow
+        // runs against mockTransactions. In real mode it's only available when
+        // the Knot merchant-list endpoint confirmed it.
+        available: isMock ? true : Boolean(live),
       };
     });
-  }, [availableMerchants]);
+  }, [availableMerchants, isMock]);
+
+  // In demo mode, precompute which mock transactions belong to which merchant
+  // so we can report a realistic per-merchant txn count on "Connect".
+  const mockTxnsByMerchant = useMemo(() => {
+    const byName = new Map<string, Transaction[]>();
+    for (const t of mockTransactions) {
+      const key = (t.merchant ?? "").toLowerCase();
+      const arr = byName.get(key) ?? [];
+      arr.push(t);
+      byName.set(key, arr);
+    }
+    const byMerchantId = new Map<number, Transaction[]>();
+    for (const target of TARGET_MERCHANTS) {
+      const txns = byName.get(target.name.toLowerCase()) ?? [];
+      byMerchantId.set(target.id, txns);
+    }
+    return byMerchantId;
+  }, []);
 
   /**
    * Refresh localStorage's wizard payload from the DB. Source of truth is the
@@ -270,6 +292,40 @@ export function LinkAccountsStep({ onNext, onBack }: LinkAccountsStepProps) {
           clientId: statusResp?.clientId,
           environment: statusResp?.environment,
         });
+
+        // Stale knot_sync_cursors (empty first scrape) makes every follow-up sync return 0 forever.
+        // Heal "connected but 0 txns" on load by forcing a cursor reset + Knot re-pull.
+        const stuck = accounts.filter(
+          (a) => a.connection_status === "connected" && (a.transaction_count ?? 0) === 0,
+        );
+        for (const acc of stuck) {
+          console.log("[knot-connect] auto-resync stuck account", {
+            merchant_id: acc.merchant_id,
+            userId,
+          });
+          void syncKnotTransactions(userId, acc.merchant_id, 100, true)
+            .then(async () => {
+              const refreshed = await getKnotAccounts(userId).catch(() => ({
+                accounts: [] as KnotAccountRow[],
+              }));
+              const list = refreshed.accounts ?? [];
+              setTxnCountByMerchant((prev) => {
+                const next = { ...prev };
+                for (const a of list) {
+                  if (a.connection_status === "connected") {
+                    next[a.merchant_id] = a.transaction_count ?? 0;
+                  }
+                }
+                return next;
+              });
+              if (list.some((a) => (a.transaction_count ?? 0) > 0)) {
+                await persistWizardPayloadFromDb(userId);
+              }
+            })
+            .catch((err) => {
+              console.warn("[knot-connect] auto-resync failed", acc.merchant_id, err);
+            });
+        }
       })
       .catch((err) => {
         console.error("[knot-connect] status/merchants failed", err);
@@ -303,7 +359,8 @@ export function LinkAccountsStep({ onNext, onBack }: LinkAccountsStepProps) {
       activePollsRef.current.set(mid, true);
 
       const intervalMs = 2000;
-      const maxElapsedMs = 60_000;
+      // Client sync can take 40s+ on production (knot-proxy first-page retries); Amazon pagination adds more.
+      const maxElapsedMs = 120_000;
       const started = Date.now();
       let lastCount = -1;
       let stableHits = 0;
@@ -361,13 +418,35 @@ export function LinkAccountsStep({ onNext, onBack }: LinkAccountsStepProps) {
   const handleSyncAfterAuth = useCallback(
     (merchant: DisplayMerchant, userId: string) => {
       setMerchantConnectionState(merchant.knotMerchantId, "syncing");
-      setStatus(
-        `${merchant.name} authenticated. Waiting for transactions to arrive via webhook...`
-      );
-      // Don't await — let polling run in background so the UI remains responsive.
+      setStatus(`${merchant.name} authenticated. Pulling your purchase history...`);
+      void (async () => {
+        try {
+          // reset_cursor clears a bad pagination cursor from an earlier empty scrape.
+          const result = await syncKnotTransactions(userId, merchant.knotMerchantId, 100, true);
+          const total = result?.total ?? result?.count ?? 0;
+          setTxnCountByMerchant((prev) => ({ ...prev, [merchant.knotMerchantId]: total }));
+          if (total > 0) {
+            setMerchantConnectionState(merchant.knotMerchantId, "connected");
+            setStatus(
+              `${merchant.name}: synced ${total} transaction${total === 1 ? "" : "s"} from Knot.`
+            );
+            await persistWizardPayloadFromDb(userId);
+          } else {
+            setStatus(
+              `${merchant.name}: Knot returned no orders yet (common right after login). Still checking…`
+            );
+          }
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          console.error("[knot-connect] sync-transactions failed", e);
+          setStatus(
+            `${merchant.name} could not sync: ${msg}. Polling continues if data arrives via Knot.`
+          );
+        }
+      })();
       void pollForTransactions(merchant, userId);
     },
-    [pollForTransactions]
+    [pollForTransactions, persistWizardPayloadFromDb]
   );
 
   const handleCancelPending = (merchantId: number, merchantName: string) => {
@@ -386,16 +465,40 @@ export function LinkAccountsStep({ onNext, onBack }: LinkAccountsStepProps) {
       realModeEligible,
       backendReady,
       available: merchant.available,
+      isMock,
     });
 
+    // Demo path: simulate the Knot auth/sync handshake with a short delay and
+    // fill the per-merchant txn count from mockTransactions. No network calls.
+    if (isMock) {
+      const txns = mockTxnsByMerchant.get(merchant.knotMerchantId) ?? [];
+      setMerchantConnectionState(merchant.knotMerchantId, "pending");
+      setLoadingMerchantId(merchant.knotMerchantId);
+      setStatus(`Opening demo login for ${merchant.name}...`);
+      await new Promise((r) => setTimeout(r, 450));
+      setMerchantConnectionState(merchant.knotMerchantId, "syncing");
+      setStatus(`${merchant.name} authenticated. Pulling demo transactions...`);
+      await new Promise((r) => setTimeout(r, 650));
+      setTxnCountByMerchant((prev) => ({
+        ...prev,
+        [merchant.knotMerchantId]: txns.length,
+      }));
+      setMerchantConnectionState(merchant.knotMerchantId, "connected");
+      setLoadingMerchantId(null);
+      setStatus(
+        txns.length > 0
+          ? `${merchant.name} connected · ${txns.length} demo transaction${txns.length === 1 ? "" : "s"}.`
+          : `${merchant.name} connected (no demo transactions for this merchant).`
+      );
+      return;
+    }
+
     if (!realModeEligible) {
-      const reason = isMock
-        ? "turn off mock mode to connect real accounts"
-        : !backendReady
-          ? "Knot credentials are not configured on the edge function"
-          : !clientId
-            ? "no Knot client_id available from the backend"
-            : "Knot is not available right now";
+      const reason = !backendReady
+        ? "Knot credentials are not configured on the edge function"
+        : !clientId
+          ? "no Knot client_id available from the backend"
+          : "Knot is not available right now";
       setStatus(`Cannot connect ${merchant.name}: ${reason}`);
       return;
     }
@@ -439,10 +542,18 @@ export function LinkAccountsStep({ onNext, onBack }: LinkAccountsStepProps) {
        */
       let authenticatedForMerchant = false;
       let syncStarted = false;
+      let onExitDebounce: ReturnType<typeof setTimeout> | null = null;
+      const clearExitDebounce = () => {
+        if (onExitDebounce) {
+          clearTimeout(onExitDebounce);
+          onExitDebounce = null;
+        }
+      };
 
       const startSyncOnce = () => {
         if (syncStarted) return;
         syncStarted = true;
+        clearExitDebounce();
         handleSyncAfterAuth(merchant, sessionResponse.externalUserId || userId);
         setLoadingMerchantId(null);
       };
@@ -458,19 +569,17 @@ export function LinkAccountsStep({ onNext, onBack }: LinkAccountsStepProps) {
         onSuccess: (...args: unknown[]) => {
           console.log("[knot-connect] onSuccess raw_args", args);
           // v1.1.1 passes a single object; older builds pass positional args.
-          // Either way, treat onSuccess as a secondary signal — AUTHENTICATED
-          // via onEvent is the real source of truth.
-          if (authenticatedForMerchant) {
-            startSyncOnce();
-          } else {
+          // Knot documents onSuccess as "successfully authenticated". Some merchants
+          // (e.g. Amazon web) complete without emitting AUTHENTICATED to onEvent;
+          // still start sync so we do not stall on webhook-only ingestion.
+          if (!authenticatedForMerchant) {
             console.warn(
-              "[knot-connect] onSuccess fired without prior AUTHENTICATED event — not marking connected",
+              "[knot-connect] onSuccess without prior AUTHENTICATED onEvent — starting sync anyway",
               { merchant: merchant.name, args }
             );
-            setStatus(
-              `Knot reported success for ${merchant.name} but no AUTHENTICATED event arrived. Try again.`
-            );
+            authenticatedForMerchant = true;
           }
+          startSyncOnce();
         },
         onEvent: (...args: unknown[]) => {
           console.log("[knot-connect] onEvent raw_args", args);
@@ -524,20 +633,39 @@ export function LinkAccountsStep({ onNext, onBack }: LinkAccountsStepProps) {
             setStatus(`Additional verification required for ${merchant.name}.`);
           } else if (event === "MERCHANT_CLICKED") {
             setStatus(`Preparing ${merchant.name} login...`);
+          } else if (event === "ACCOUNT_LOGIN_REQUIRED") {
+            clearExitDebounce();
+            authenticatedForMerchant = false;
+            syncStarted = false;
+            clearMerchantConnectionState(merchant.knotMerchantId);
+            setLoadingMerchantId(null);
+            setStatus(
+              `${merchant.name} needs you to sign in again. Tap Connect when you are ready.`
+            );
+          } else if (event === "REFRESH_SESSION_REQUEST") {
+            setStatus(`Keeping your ${merchant.name} session active — continue in the Knot window.`);
           }
         },
         onExit: (...args: unknown[]) => {
           console.log("[knot-connect] onExit raw_args", args);
-          if (!authenticatedForMerchant) {
-            clearMerchantConnectionState(merchant.knotMerchantId);
-            setLoadingMerchantId(null);
-            setStatus(
-              `Knot closed before ${merchant.name} was authenticated. Click Connect to try again.`
-            );
-          }
+          if (authenticatedForMerchant) return;
+          // Amazon / embedded OAuth often fires onExit during in-modal redirects; do not
+          // reset UI immediately or the user gets bounced back to "Connect" mid-login.
+          clearExitDebounce();
+          onExitDebounce = setTimeout(() => {
+            onExitDebounce = null;
+            if (!authenticatedForMerchant) {
+              clearMerchantConnectionState(merchant.knotMerchantId);
+              setLoadingMerchantId(null);
+              setStatus(
+                `Knot closed before ${merchant.name} was authenticated. Click Connect to try again.`
+              );
+            }
+          }, 2500);
         },
         onError: (...errArgs: unknown[]) => {
           console.error("[knot-connect] onError raw_args", errArgs);
+          clearExitDebounce();
           clearMerchantConnectionState(merchant.knotMerchantId);
           setLoadingMerchantId(null);
 
@@ -599,6 +727,26 @@ export function LinkAccountsStep({ onNext, onBack }: LinkAccountsStepProps) {
   );
 
   const handleProceed = async () => {
+    // Demo path: pass through mockTransactions for the merchants the user
+    // "connected" in demo mode. Falls back to all mockTransactions if they
+    // somehow clicked Continue with nothing connected.
+    if (isMock) {
+      const connectedIds = Object.entries(connectionStates)
+        .filter(([, state]) => state === "connected")
+        .map(([id]) => Number(id));
+      const connectedMerchantNames = new Set<string>(
+        TARGET_MERCHANTS.filter((t) => connectedIds.includes(t.id)).map((t) =>
+          t.name.toLowerCase()
+        )
+      );
+      const filtered = mockTransactions.filter((t) =>
+        connectedMerchantNames.has((t.merchant ?? "").toLowerCase())
+      );
+      const payload = filtered.length > 0 ? filtered : mockTransactions;
+      onNext(payload);
+      return;
+    }
+
     const userId = userIdRef.current || getOrCreateKnotUserId();
     try {
       const count = await persistWizardPayloadFromDb(userId);
@@ -720,7 +868,11 @@ export function LinkAccountsStep({ onNext, onBack }: LinkAccountsStepProps) {
                     size="sm"
                     variant="outline"
                     onClick={() => handleLinkMerchant(merchant)}
-                    disabled={loadingMerchantId !== null || !realModeEligible || !merchant.available}
+                    disabled={
+                      loadingMerchantId !== null ||
+                      !merchant.available ||
+                      (!isMock && !realModeEligible)
+                    }
                     className="text-xs h-8"
                   >
                     {isLoadingThis ? <Loader2 className="w-3 h-3 animate-spin" /> : "Connect"}
@@ -762,10 +914,10 @@ export function LinkAccountsStep({ onNext, onBack }: LinkAccountsStepProps) {
         {connectedCount > 0 && (
           <Button
             onClick={handleProceed}
-            disabled={totalRealTransactions === 0}
+            disabled={!isMock && totalRealTransactions === 0}
             className="gap-2 font-semibold"
           >
-            Continue with {totalRealTransactions} real transaction
+            Continue with {totalRealTransactions} {isMock ? "demo" : "real"} transaction
             {totalRealTransactions === 1 ? "" : "s"}
           </Button>
         )}

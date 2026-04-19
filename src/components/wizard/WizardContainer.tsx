@@ -10,7 +10,6 @@ import { TakeActionStep } from "./TakeActionStep";
 import type { Transaction } from "@/data/mock-transactions";
 import type { ExposureAnalysis } from "@/data/mock-analysis";
 import type { Lawsuit } from "@/data/mock-lawsuits";
-import type { ClinicalTrial } from "@/data/mock-trials";
 
 export function WizardContainer() {
   const { step, nextStep, prevStep, goToStep, data, updateData } = useWizard();
@@ -24,15 +23,15 @@ export function WizardContainer() {
   );
 
   const handleAnalysisComplete = useCallback(
-    (analysis: ExposureAnalysis, lawsuits: Lawsuit[], trials: ClinicalTrial[]) => {
-      updateData({ analysis, lawsuits, trials });
+    (analysis: ExposureAnalysis, lawsuits: Lawsuit[]) => {
+      updateData({ analysis, lawsuits });
       nextStep();
     },
     [updateData, nextStep]
   );
 
   const handleRestart = useCallback(() => {
-    updateData({ transactions: [], analysis: null, lawsuits: [], trials: [] });
+    updateData({ transactions: [], analysis: null, lawsuits: [] });
     goToStep(0 as WizardStep);
   }, [updateData, goToStep]);
 
@@ -74,7 +73,6 @@ export function WizardContainer() {
           <TakeActionStep
             key="action"
             lawsuits={data.lawsuits}
-            trials={data.trials}
             transactions={data.transactions}
             onRestart={handleRestart}
           />

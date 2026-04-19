@@ -5,8 +5,8 @@ import { ArrowRight } from "lucide-react";
 const EASE_EXPO = [0.16, 1, 0.3, 1] as const;
 
 const stats = [
-  { value: "$12.5B", label: "in active class action settlements" },
-  { value: "1,200+", label: "chemicals screened against EPA database" },
+  { value: "$230B", label: "in class action settlements over the last 4 years" },
+  { value: "4,500+", label: "chemicals screened against EPA database" },
   { value: "3 min", label: "average time to find your match" },
 ];
 
@@ -54,7 +54,7 @@ export function WelcomeStep({ onNext }: { onNext: () => void }) {
         className="text-lg text-muted-foreground leading-relaxed mb-12"
         style={{ maxWidth: "52ch" }}
       >
-        Vigilant scans your purchase history for products tied to class action
+        Aletheia scans your purchase history for products tied to class action
         lawsuits — then tells you exactly what you may be owed.
       </motion.p>
 

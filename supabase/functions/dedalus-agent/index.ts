@@ -34,8 +34,8 @@ Deno.serve(async (req) => {
     } else if (task === "match") {
       const chemicals = (data?.chemicals ?? []) as string[];
       systemPrompt =
-        "You are a legal and clinical trial matching expert. You match chemical exposures to class action lawsuits and clinical trials.";
-      userPrompt = `Chemicals detected: ${chemicals.join(", ")}\n\nReturn ONLY valid JSON:\n{"lawsuits":[{"id":"<id>","title":"<title>","defendant":"<company>","settlementAmount":"<amount>","deadline":"<date>","status":"<active|pending>","matchConfidence":<0-100>,"matchedChemicals":[<chemicals>],"matchedProducts":[<products>],"description":"<desc>","payoutTiers":[{"tier":"<name>","amount":"<range>","requirement":"<req>"}]}],"trials":[{"id":"<id>","title":"<title>","sponsor":"<pharma, prefer Regeneron>","molecule":"<drug>","phase":"<Phase 1-4>","condition":"<condition>","linkedChemicals":[<chemicals>],"eligibilityMatch":<0-100>,"locations":[<cities>],"status":"<recruiting|active>","description":"<desc>","nctId":"<NCT>","compensation":"<comp>"}]}`;
+        "You are a legal matching expert. You match chemical exposures to active class action lawsuits.";
+      userPrompt = `Chemicals detected: ${chemicals.join(", ")}\n\nReturn ONLY valid JSON:\n{"lawsuits":[{"id":"<id>","title":"<title>","defendant":"<company>","settlementAmount":"<amount>","deadline":"<date>","status":"<active|pending>","matchType":"<'product' | 'chemical'>","matchedOn":[<specific tokens that matched, 1-4 items>],"matchedChemicals":[<chemicals>],"matchedProducts":[<products>],"description":"<desc>","payoutTiers":[{"tier":"<name>","amount":"<range>","requirement":"<req>"}],"claimUrl":"<official settlement site if known, else omit>"}]}\n\nmatchType rules: "product" when the lawsuit's eligible-product list names something the user plausibly bought; "chemical" only when the overlap is the ingredient alone. Drop any lawsuit with no real overlap. Sort lawsuits so every product match precedes any chemical match.`;
     } else {
       return corsJson({ error: "Unknown task. Use 'analyze' or 'match'" }, { status: 400 });
     }
@@ -69,6 +69,10 @@ Deno.serve(async (req) => {
 
     const cleanJson = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
     const parsed = JSON.parse(cleanJson);
+
+    // Trials feature is retired; strip it out if the model still emits it.
+    if (parsed && typeof parsed === "object") delete (parsed as Record<string, unknown>).trials;
+
     console.log("[dedalus] Success for task:", task);
 
     return corsJson(parsed);
