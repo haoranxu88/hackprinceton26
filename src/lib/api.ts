@@ -9,6 +9,18 @@ import { supabase } from "@/integrations/supabase/client";
 
 const DEBUG = import.meta.env.VITE_DEBUG_API === "true";
 
+const knotApiBaseUrl = import.meta.env.VITE_API_URL || "http://localhost:8000";
+
+async function parseJsonOrThrow(response: Response) {
+  const text = await response.text();
+  const data = text ? JSON.parse(text) : null;
+  if (!response.ok) {
+    const message = data?.error || data?.message || `Request failed with ${response.status}`;
+    throw new Error(message);
+  }
+  return data;
+}
+
 async function ensureAuth() {
   const { data: { session } } = await supabase.auth.getSession();
   if (session) return session;
@@ -49,6 +61,26 @@ async function invokeEdgeFunction<T = unknown>(
 
 // ---------- Knot (TransactionLink) ----------
 
+export async function createKnotTransactionLinkSession(userId: string) {
+  const response = await fetch(`${knotApiBaseUrl}/api/knot/session`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ userId }),
+  });
+
+  return parseJsonOrThrow(response);
+}
+
+export async function listKnotTransactionLinkMerchants() {
+  const response = await fetch(`${knotApiBaseUrl}/api/knot/merchants?platform=web`);
+  return parseJsonOrThrow(response);
+}
+
+export async function getKnotBackendStatus() {
+  const response = await fetch(`${knotApiBaseUrl}/api/knot/status`);
+  return parseJsonOrThrow(response);
+}
+
 export async function listKnotMerchants() {
   return invokeEdgeFunction("knot-proxy", { action: "list-merchants" });
 }
@@ -81,4 +113,14 @@ export async function scrapeSettlements() {
 /** Alternate LLM provider (Dedalus, OpenAI-compatible). Drop-in swap if Gemini is down. */
 export async function dedalusAgent(task: "analyze" | "match", data: Record<string, unknown>) {
   return invokeEdgeFunction("dedalus-agent", { task, data });
+}
+
+/**
+ * Send a receipt email via Resend.
+ * @param image  - A public image URL or base64 data URL (e.g. "data:image/png;base64,...")
+ * @param userName - Recipient's display name
+ * @param emailId  - Recipient's email address
+ */
+export async function sendReceiptEmail(image: string, userName: string, emailId: string) {
+  return invokeEdgeFunction("send-receipt-email", { image, userName, emailId });
 }
