@@ -5,6 +5,7 @@ import { LawsuitCard } from "@/components/claims/LawsuitCard";
 import { TrialCard } from "@/components/trials/TrialCard";
 import type { Lawsuit } from "@/data/mock-lawsuits";
 import type { ClinicalTrial } from "@/data/mock-trials";
+import type { Transaction } from "@/data/mock-transactions";
 import { RotateCcw } from "lucide-react";
 
 const EASE_EXPO = [0.16, 1, 0.3, 1] as const;
@@ -12,6 +13,7 @@ const EASE_EXPO = [0.16, 1, 0.3, 1] as const;
 interface TakeActionStepProps {
   lawsuits: Lawsuit[];
   trials: ClinicalTrial[];
+  transactions: Transaction[];
   onRestart: () => void;
 }
 
@@ -25,7 +27,7 @@ const fadeUp = {
   show: { opacity: 1, y: 0, transition: { duration: 0.42, ease: EASE_EXPO } },
 };
 
-export function TakeActionStep({ lawsuits, trials, onRestart }: TakeActionStepProps) {
+export function TakeActionStep({ lawsuits, trials, transactions, onRestart }: TakeActionStepProps) {
   const activeLawsuits = lawsuits.filter((l) => l.status === "active");
   const recruitingTrials = trials.filter((t) => t.status === "recruiting");
 
@@ -69,7 +71,11 @@ export function TakeActionStep({ lawsuits, trials, onRestart }: TakeActionStepPr
           <TabsContent value="lawsuits">
             <div className="divide-y divide-border">
               {lawsuits.map((lawsuit) => (
-                <LawsuitCard key={lawsuit.id} lawsuit={lawsuit} />
+                <LawsuitCard
+                  key={lawsuit.id}
+                  lawsuit={lawsuit}
+                  transactions={transactions}
+                />
               ))}
             </div>
           </TabsContent>

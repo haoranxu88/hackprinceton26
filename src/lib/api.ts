@@ -9,18 +9,6 @@ import { supabase } from "@/integrations/supabase/client";
 
 const DEBUG = import.meta.env.VITE_DEBUG_API === "true";
 
-const knotApiBaseUrl = import.meta.env.VITE_API_URL || "http://localhost:8000";
-
-async function parseJsonOrThrow(response: Response) {
-  const text = await response.text();
-  const data = text ? JSON.parse(text) : null;
-  if (!response.ok) {
-    const message = data?.error || data?.message || `Request failed with ${response.status}`;
-    throw new Error(message);
-  }
-  return data;
-}
-
 async function ensureAuth() {
   const { data: { session } } = await supabase.auth.getSession();
   if (session) return session;
@@ -61,36 +49,129 @@ async function invokeEdgeFunction<T = unknown>(
 
 // ---------- Knot (TransactionLink) ----------
 
-export async function createKnotTransactionLinkSession(userId: string) {
-  const response = await fetch(`${knotApiBaseUrl}/api/knot/session`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ userId }),
-  });
-
-  return parseJsonOrThrow(response);
+export interface KnotStatusResponse {
+  ok: boolean;
+  hasClientId: boolean;
+  clientId: string | null;
+  environment: string;
 }
 
-export async function listKnotTransactionLinkMerchants() {
-  const response = await fetch(`${knotApiBaseUrl}/api/knot/merchants?platform=web`);
-  return parseJsonOrThrow(response);
+export interface KnotMerchant {
+  id: number;
+  name: string;
+  min_sdk_version?: string;
+  [key: string]: unknown;
+}
+
+export interface KnotMerchantsResponse {
+  merchants: KnotMerchant[];
+  platform: string;
+}
+
+export interface KnotSessionResponse {
+  sessionId: string;
+  clientId: string;
+  environment: string;
+  externalUserId: string;
+}
+
+export interface KnotSyncResponse {
+  transactions: unknown[];
+  merchant: unknown;
+  count: number;
+  /** Total rows in knot_transactions for this user+merchant after the sync. */
+  total?: number;
+}
+
+export interface KnotAccountRow {
+  external_user_id: string;
+  merchant_id: number;
+  merchant_name: string | null;
+  connection_status: "connected" | "disconnected" | string;
+  last_authenticated_at: string | null;
+  last_synced_at: string | null;
+  transaction_count: number | null;
+}
+
+export interface KnotAccountsResponse {
+  accounts: KnotAccountRow[];
+}
+
+export interface KnotTransactionRow {
+  id: string;
+  external_user_id: string;
+  merchant_id: number;
+  merchant_name: string | null;
+  external_id: string | null;
+  datetime: string;
+  order_status: string;
+  url: string | null;
+  price_total: string;
+  price_sub_total: string | null;
+  price_currency: string | null;
+  products: unknown;
+  payment_methods: unknown;
+  shipping: unknown;
+  raw: Record<string, unknown>;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface KnotTransactionsResponse {
+  transactions: KnotTransactionRow[];
+  count: number;
 }
 
 export async function getKnotBackendStatus() {
-  const response = await fetch(`${knotApiBaseUrl}/api/knot/status`);
-  return parseJsonOrThrow(response);
+  return invokeEdgeFunction<KnotStatusResponse>("knot-proxy", { action: "status" });
 }
 
-export async function listKnotMerchants() {
-  return invokeEdgeFunction("knot-proxy", { action: "list-merchants" });
+export async function listKnotTransactionLinkMerchants(platform: string = "web") {
+  return invokeEdgeFunction<KnotMerchantsResponse>("knot-proxy", {
+    action: "list-merchants",
+    platform,
+  });
 }
 
-export async function linkKnotAccount(userId: string, merchantId: number) {
-  return invokeEdgeFunction("knot-proxy", { action: "link-account", userId, merchantId });
+export async function createKnotTransactionLinkSession(userId: string) {
+  return invokeEdgeFunction<KnotSessionResponse>("knot-proxy", {
+    action: "create-session",
+    userId,
+  });
 }
 
-export async function syncKnotTransactions(userId: string, merchantId: number) {
-  return invokeEdgeFunction("knot-proxy", { action: "sync-transactions", userId, merchantId });
+export async function syncKnotTransactions(userId: string, merchantId: number, limit: number = 100) {
+  return invokeEdgeFunction<KnotSyncResponse>("knot-proxy", {
+    action: "sync-transactions",
+    userId,
+    merchantId,
+    limit,
+  });
+}
+
+/** Read webhook-populated connection status for every merchant linked by this user. */
+export async function getKnotAccounts(userId: string) {
+  return invokeEdgeFunction<KnotAccountsResponse>("knot-proxy", {
+    action: "get-accounts",
+    userId,
+  });
+}
+
+/**
+ * Read webhook-populated transactions. Optionally filter by merchant.
+ * This is what the UI polls while it waits for Knot to finish a sync.
+ */
+export async function getKnotTransactions(
+  userId: string,
+  merchantId?: number,
+  limit: number = 500,
+) {
+  return invokeEdgeFunction<KnotTransactionsResponse>("knot-proxy", {
+    action: "get-transactions",
+    userId,
+    ...(merchantId !== undefined ? { merchantId } : {}),
+    limit,
+  });
 }
 
 // ---------- AI analysis ----------

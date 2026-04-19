@@ -75,6 +75,7 @@ export function WizardContainer() {
             key="action"
             lawsuits={data.lawsuits}
             trials={data.trials}
+            transactions={data.transactions}
             onRestart={handleRestart}
           />
         )}

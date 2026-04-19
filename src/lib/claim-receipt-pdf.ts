@@ -8,11 +8,63 @@ export interface MatchedTransaction {
   matched: Product[];
 }
 
+// Words that carry no discriminative power when matching a product name against
+// a lawsuit-registered product ("the Johnson's Baby Powder with 22 oz" vs
+// "Johnson's Baby Powder Original" should still match on brand+category, not
+// drown in filler tokens).
+const MATCH_STOPWORDS = new Set([
+  "the", "and", "for", "with", "size", "pack", "count", "ct", "oz", "ml", "fl",
+  "lb", "lbs", "kg", "pc", "pcs", "ea", "each", "new", "pro", "plus", "x",
+  "ounce", "ounces", "gram", "grams", "liter", "litre", "liters", "litres",
+  "inch", "inches", "bottle", "bottles", "spray", "jar", "tube", "box",
+]);
+
+function tokenize(input: string): Set<string> {
+  const tokens = input
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean)
+    .filter((t) => t.length >= 3 && !MATCH_STOPWORDS.has(t) && !/^\d+$/.test(t));
+  return new Set(tokens);
+}
+
+/**
+ * Match a transaction product against a lawsuit's registered product strings.
+ *
+ * Strategy, in order of increasing cost:
+ *   1. Bidirectional substring match (cheapest; handles exact-match cases).
+ *   2. Token-overlap: lower-case both sides, strip punctuation/units, then
+ *      require ≥2 shared non-stopword tokens (or all needle tokens when the
+ *      needle is <=2 tokens). This is what lets "Johnson's Baby Powder, 22 oz"
+ *      match the lawsuit entry "Johnson's Baby Powder Original".
+ */
 export function findMatchedProducts(txn: Transaction, lawsuit: Lawsuit): Product[] {
-  const needles = lawsuit.matchedProducts.map((p) => p.toLowerCase());
+  const needles = lawsuit.matchedProducts.map((p) => ({
+    raw: p.toLowerCase(),
+    tokens: tokenize(p),
+  }));
+
   return txn.products.filter((product) => {
     const name = product.name.toLowerCase();
-    return needles.some((needle) => name.includes(needle) || needle.includes(name));
+    const productTokens = tokenize(product.name);
+
+    for (const needle of needles) {
+      if (name.includes(needle.raw) || needle.raw.includes(name)) return true;
+
+      if (needle.tokens.size === 0) continue;
+
+      let overlap = 0;
+      for (const t of needle.tokens) {
+        if (productTokens.has(t)) overlap += 1;
+      }
+
+      const required = Math.min(2, needle.tokens.size);
+      if (overlap >= required) return true;
+    }
+
+    return false;
   });
 }
 

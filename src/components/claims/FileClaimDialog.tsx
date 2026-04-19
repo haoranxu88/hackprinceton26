@@ -10,7 +10,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import type { Lawsuit } from "@/data/mock-lawsuits";
-import { mockTransactions } from "@/data/mock-transactions";
+import { mockTransactions, type Transaction } from "@/data/mock-transactions";
 import {
   findMatchingTransactions,
   generateClaimReceiptPdf,
@@ -26,6 +26,13 @@ import {
 
 interface FileClaimDialogProps {
   lawsuit: Lawsuit;
+  /**
+   * Real, Knot-synced transactions for the logged-in user. If omitted or
+   * empty we fall back to `mockTransactions` so the flow still demos from a
+   * cold start, but in a normal end-to-end run this comes from the Link
+   * Accounts step via the wizard state.
+   */
+  transactions?: Transaction[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
@@ -80,12 +87,16 @@ function StepHeader({
 
 export function FileClaimDialog({
   lawsuit,
+  transactions,
   open,
   onOpenChange,
 }: FileClaimDialogProps) {
+  const sourceTxns = transactions && transactions.length > 0 ? transactions : mockTransactions;
+  const usingRealTxns = transactions !== undefined && transactions.length > 0;
+
   const matchingTxns = useMemo(
-    () => findMatchingTransactions(mockTransactions, lawsuit),
-    [lawsuit]
+    () => findMatchingTransactions(sourceTxns, lawsuit),
+    [sourceTxns, lawsuit]
   );
 
   return (
@@ -178,8 +189,17 @@ export function FileClaimDialog({
               />
               <div className="pl-[52px] mt-3 space-y-2">
                 {matchingTxns.length === 0 ? (
-                  <div className="rounded-lg border border-border bg-secondary/40 px-4 py-3 text-xs text-muted-foreground">
-                    No matching transactions found in your linked accounts.
+                  <div className="rounded-lg border border-border bg-secondary/40 px-4 py-3 text-xs text-muted-foreground space-y-1">
+                    <p>
+                      {usingRealTxns
+                        ? `We searched ${sourceTxns.length} transaction${sourceTxns.length === 1 ? "" : "s"} from your linked accounts and none matched the products in this settlement.`
+                        : "No linked transactions yet — link an account on Step 1 to scan your purchase history."}
+                    </p>
+                    {usingRealTxns && (
+                      <p className="text-[11px] text-muted-foreground/80">
+                        Matching on: {lawsuit.matchedProducts.join(", ")}
+                      </p>
+                    )}
                   </div>
                 ) : (
                   matchingTxns.map(({ txn, matched }) => (
