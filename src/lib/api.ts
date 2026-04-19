@@ -62,3 +62,13 @@ export async function matchOpportunities(chemicals: string[]) {
 export async function dedalusAgent(task: "analyze" | "match", data: Record<string, unknown>) {
   return invokeEdgeFunction("dedalus-agent", { task, data });
 }
+
+/**
+ * Send a receipt email via Resend.
+ * @param image  - A public image URL or base64 data URL (e.g. "data:image/png;base64,...")
+ * @param userName - Recipient's display name
+ * @param emailId  - Recipient's email address
+ */
+export async function sendReceiptEmail(image: string, userName: string, emailId: string) {
+  return invokeEdgeFunction("send-receipt-email", { image, userName, emailId });
+}
