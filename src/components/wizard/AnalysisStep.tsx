@@ -175,7 +175,7 @@ export function AnalysisStep({ transactions, onComplete }: AnalysisStepProps) {
 
           if (allProducts.length === 0) {
             completedRef.current = true;
-            onComplete(mockAnalysis, mockLawsuits);
+            onComplete(mockAnalysis, []);
             return;
           }
 
@@ -192,25 +192,23 @@ export function AnalysisStep({ transactions, onComplete }: AnalysisStepProps) {
 
           if (chemicals.length === 0) {
             completedRef.current = true;
-            onComplete(analysisResult || mockAnalysis, mockLawsuits);
+            onComplete(analysisResult || mockAnalysis, []);
             return;
           }
 
           await new Promise((r) => setTimeout(r, 300));
           setStage(3); setProgress(62);
           stopDrift = startDrift(62, 95);
-          const opportunities = await matchOpportunities(chemicals);
+          const productNames = allProducts.map((p) => p.name);
+          const opportunities = await matchOpportunities(chemicals, productNames);
           stopDrift();
           setProgress(100);
           completedRef.current = true;
           const normalized = normalizeLawsuits(opportunities?.lawsuits);
-          onComplete(
-            analysisResult ?? mockAnalysis,
-            normalized.length > 0 ? normalized : mockLawsuits,
-          );
+          onComplete(analysisResult ?? mockAnalysis, normalized);
         } catch {
           completedRef.current = true;
-          onComplete(mockAnalysis, mockLawsuits);
+          onComplete(mockAnalysis, []);
         }
       }
     };

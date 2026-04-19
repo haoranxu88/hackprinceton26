@@ -1,5 +1,5 @@
 /**
- * Shared Gemini 2.5 Flash helpers for LegalRedress Edge Functions.
+ * Shared Gemini helpers for LegalRedress Edge Functions.
  *
  * All calls go through `callGemini` so we get one place to tune retries,
  * thinking budget, token limits, and rate-limit backoff.
@@ -44,8 +44,8 @@ export interface GeminiOptions {
 }
 
 /**
- * Single-prompt Gemini 2.5 Flash call with 429 backoff.
- * Thought content is disabled (`thinkingBudget: 0`) because it eats output tokens.
+ * Single-prompt Gemini call with backoff on 429 and transient 5xx.
+ * Model: `GEMINI_MODEL` env, else `gemini-3.1-flash-lite-preview` (Google’s listed id for 3.1 Flash-Lite preview).
  */
 export async function callGemini(prompt: string, opts: GeminiOptions = {}): Promise<string> {
   const key = Deno.env.get("GEMINI_API_KEY");
@@ -58,9 +58,9 @@ export async function callGemini(prompt: string, opts: GeminiOptions = {}): Prom
     label = "gemini",
   } = opts;
 
-  const url = "https://generativelanguage.googleapis.com/v1beta/models/gemma-4-31b-it:generateContent";
-  // const url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent";
-    // "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
+  const modelId = Deno.env.get("GEMINI_MODEL")?.trim() || "gemini-3.1-flash-lite-preview";
+  const url =
+    `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent`;
 
   for (let attempt = 1; attempt <= retries; attempt++) {
     const resp = await fetch(url, {
@@ -71,21 +71,38 @@ export async function callGemini(prompt: string, opts: GeminiOptions = {}): Prom
         generationConfig: {
           temperature,
           maxOutputTokens,
-          thinkingConfig: { thinkingBudget: 0 },
         },
       }),
     });
 
+    const text = await resp.text();
+
     if (resp.status === 429 && attempt < retries) {
-      const waitMs = attempt * 15000;
+      const waitMs = attempt * 2000;
       console.log(`[${label}] Rate limited, waiting ${waitMs / 1000}s before retry ${attempt + 1}...`);
       await new Promise((r) => setTimeout(r, waitMs));
       continue;
     }
 
-    const text = await resp.text();
-    if (!resp.ok) throw new Error(`Gemini ${resp.status}: ${text.slice(0, 200)}`);
-    const data = JSON.parse(text);
+    if ((resp.status === 503 || resp.status === 500 || resp.status === 502) && attempt < retries) {
+      const waitMs = attempt * 1500;
+      console.log(
+        `[${label}] Gemini ${resp.status}, waiting ${waitMs / 1000}s before retry ${attempt + 1}...`,
+      );
+      await new Promise((r) => setTimeout(r, waitMs));
+      continue;
+    }
+
+    if (!resp.ok) {
+      throw new Error(`Gemini ${resp.status}: ${text.slice(0, 400)}`);
+    }
+
+    let data: unknown;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      throw new Error(`Gemini returned non-JSON body (first 200 chars): ${text.slice(0, 200)}`);
+    }
     return extractGeminiText(data);
   }
 

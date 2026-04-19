@@ -149,6 +149,29 @@ function buildHtml(p: Payload): string {
 </html>`;
 }
 
+/**
+ * Resend sender policy:
+ *   - `onboarding@resend.dev` is the ONLY sender on the resend.dev sandbox
+ *     domain that works out of the box; every other `*@resend.dev` address
+ *     returns 403 "You can only send testing emails ...".
+ *   - Set the RESEND_FROM secret to override (e.g. "Vigilant <noreply@yourdomain.com>")
+ *     once a domain is verified in the Resend dashboard.
+ */
+const DEFAULT_FROM = "Vigilant Claim Receipts <onboarding@resend.dev>";
+
+function describeResendError(body: unknown, fallback: string): string {
+  if (body && typeof body === "object") {
+    const obj = body as Record<string, unknown>;
+    if (typeof obj.message === "string") return obj.message;
+    if (typeof obj.error === "string") return obj.error;
+    if (obj.error && typeof obj.error === "object") {
+      const inner = obj.error as Record<string, unknown>;
+      if (typeof inner.message === "string") return inner.message;
+    }
+  }
+  return fallback;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -156,7 +179,16 @@ Deno.serve(async (req) => {
 
   try {
     const resendApiKey = Deno.env.get("RESEND_API_KEY");
-    if (!resendApiKey) throw new Error("RESEND_API_KEY not configured");
+    if (!resendApiKey) {
+      return new Response(
+        JSON.stringify({
+          error:
+            "RESEND_API_KEY is not configured on the send-receipt-email edge function. " +
+            "Add it with: supabase secrets set RESEND_API_KEY=re_xxx",
+        }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
 
     const payload = (await req.json()) as Partial<Payload>;
 
@@ -181,9 +213,10 @@ Deno.serve(async (req) => {
     const full = payload as Payload;
     const html = buildHtml(full);
     const fileName = full.pdfFileName ?? `claim-receipt-${full.transactionId}.pdf`;
+    const from = Deno.env.get("RESEND_FROM") || DEFAULT_FROM;
 
     const resendBody = {
-      from: "receipts@resend.dev",
+      from,
       to: full.emailId,
       subject: `Claim Receipt: ${full.lawsuitTitle}`,
       html,
@@ -204,18 +237,45 @@ Deno.serve(async (req) => {
       body: JSON.stringify(resendBody),
     });
 
-    const resBody = await res.json();
+    const resBody = await res.json().catch(() => ({}));
 
     if (!res.ok) {
-      console.error("[send-receipt-email] Resend error:", resBody);
-      return new Response(JSON.stringify({ error: resBody }), {
-        status: res.status,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      const message = describeResendError(resBody, `Resend HTTP ${res.status}`);
+      console.error("[send-receipt-email] Resend error:", res.status, resBody);
+
+      let hint = "";
+      if (res.status === 403) {
+        // Most common 403 from Resend on a default sandbox account:
+        // "You can only send testing emails to your own email address."
+        hint =
+          " Hint: Resend sandbox only delivers to the email address that owns the Resend account. " +
+          "Either send to your own account email, or verify a custom domain in the Resend dashboard " +
+          "and set RESEND_FROM to an address on that domain.";
+      } else if (res.status === 401) {
+        hint = " Hint: RESEND_API_KEY is invalid or revoked — rotate it in the Resend dashboard.";
+      } else if (res.status === 422) {
+        hint = " Hint: Resend rejected the request payload (likely the from address or attachment).";
+      }
+
+      return new Response(
+        JSON.stringify({
+          error: message + hint,
+          resendStatus: res.status,
+          resendBody: resBody,
+          sentFrom: from,
+          sentTo: full.emailId,
+        }),
+        {
+          // Propagate Resend's status back to the client unchanged so the UI
+          // can distinguish "config problem" (4xx) from "outage" (5xx).
+          status: res.status,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
     }
 
-    console.log("[send-receipt-email] Sent to", full.emailId, "id:", resBody.id);
-    return new Response(JSON.stringify({ success: true, id: resBody.id }), {
+    console.log("[send-receipt-email] Sent to", full.emailId, "id:", resBody.id, "from:", from);
+    return new Response(JSON.stringify({ success: true, id: resBody.id, from }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (err) {

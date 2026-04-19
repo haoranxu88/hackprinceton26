@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { LawsuitCard } from "@/components/claims/LawsuitCard";
 import type { Lawsuit } from "@/data/mock-lawsuits";
 import type { Transaction } from "@/data/mock-transactions";
-import { RotateCcw } from "lucide-react";
+import { RotateCcw, ShieldCheck } from "lucide-react";
 
 const EASE_EXPO = [0.16, 1, 0.3, 1] as const;
 
@@ -66,20 +66,29 @@ export function TakeActionStep({ lawsuits, transactions, onRestart }: TakeAction
       </motion.div>
 
       <motion.div variants={fadeUp}>
-        <div className="flex items-center gap-2 mb-6">
-          <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-semibold">
-            Settlements
-          </span>
-          <span className="text-xs text-muted-foreground">
-            ({sortedLawsuits.length})
-          </span>
-        </div>
-
-        <div className="divide-y divide-border">
-          {sortedLawsuits.map((lawsuit) => (
-            <LawsuitCard key={lawsuit.id} lawsuit={lawsuit} transactions={transactions} />
-          ))}
-        </div>
+        {sortedLawsuits.length === 0 ? (
+          <div className="flex flex-col items-center gap-4 py-16 text-center text-muted-foreground">
+            <ShieldCheck className="w-10 h-10 opacity-40" />
+            <p className="text-sm">No matching settlements found for your purchase history.</p>
+            <p className="text-xs opacity-60">Our settlement database may not yet cover your products — check back as new cases are added.</p>
+          </div>
+        ) : (
+          <>
+            <div className="flex items-center gap-2 mb-6">
+              <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-semibold">
+                Settlements
+              </span>
+              <span className="text-xs text-muted-foreground">
+                ({sortedLawsuits.length})
+              </span>
+            </div>
+            <div className="divide-y divide-border">
+              {sortedLawsuits.map((lawsuit) => (
+                <LawsuitCard key={lawsuit.id} lawsuit={lawsuit} transactions={transactions} />
+              ))}
+            </div>
+          </>
+        )}
       </motion.div>
 
       <motion.div variants={fadeUp} className="pt-8 border-t border-border flex justify-center">

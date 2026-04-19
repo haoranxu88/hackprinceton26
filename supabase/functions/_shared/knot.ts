@@ -74,6 +74,19 @@ export async function knotFetch<T = unknown>(
  * public.knot_transactions. Preserves the original payload in `raw` so no
  * data is lost even if the schema evolves.
  */
+function coerceIsoDatetime(value: unknown): string | null {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const ms = value < 1e12 ? value * 1000 : value;
+    try {
+      return new Date(ms).toISOString();
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
 export function mapKnotTransactionRow(
   txn: Record<string, unknown>,
   context: {
@@ -83,16 +96,31 @@ export function mapKnotTransactionRow(
   }
 ): Record<string, unknown> | null {
   if (!txn || typeof txn !== "object") return null;
-  const id = typeof txn.id === "string" ? txn.id : null;
+  const idRaw = txn.id;
+  const id =
+    typeof idRaw === "string"
+      ? idRaw
+      : typeof idRaw === "number"
+        ? String(idRaw)
+        : null;
   if (!id) return null;
 
   const price = (txn.price && typeof txn.price === "object"
     ? txn.price
     : {}) as Record<string, unknown>;
-  const datetime = typeof txn.datetime === "string" ? txn.datetime : null;
+  const datetime =
+    coerceIsoDatetime(txn.datetime) ??
+    coerceIsoDatetime(txn.order_datetime) ??
+    coerceIsoDatetime((txn as { date?: unknown }).date);
   if (!datetime) return null;
   const orderStatus = typeof txn.order_status === "string" ? txn.order_status : "UNRECOGNIZED";
-  const total = typeof price.total === "string" ? price.total : "0";
+  const totalRaw = price.total;
+  const total =
+    typeof totalRaw === "string"
+      ? totalRaw
+      : typeof totalRaw === "number"
+        ? String(totalRaw)
+        : "0";
 
   return {
     id,
@@ -104,7 +132,12 @@ export function mapKnotTransactionRow(
     order_status: orderStatus,
     url: typeof txn.url === "string" ? txn.url : null,
     price_total: total,
-    price_sub_total: typeof price.sub_total === "string" ? price.sub_total : null,
+    price_sub_total:
+      typeof price.sub_total === "string"
+        ? price.sub_total
+        : typeof price.sub_total === "number"
+          ? String(price.sub_total)
+          : null,
     price_currency: typeof price.currency === "string" ? price.currency : null,
     products: Array.isArray(txn.products) ? txn.products : null,
     payment_methods: Array.isArray(txn.payment_methods) ? txn.payment_methods : null,

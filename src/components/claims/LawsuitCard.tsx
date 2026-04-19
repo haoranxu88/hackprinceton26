@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { FileClaimDialog } from "@/components/claims/FileClaimDialog";
 import type { Lawsuit } from "@/data/mock-lawsuits";
 import type { Transaction } from "@/data/mock-transactions";
-import { FileText, Clock } from "lucide-react";
+import { findMatchingTransactions, type MatchedTransaction } from "@/lib/claim-receipt-pdf";
+import { FileText, Clock, ShoppingBag } from "lucide-react";
 
 interface LawsuitCardProps {
   lawsuit: Lawsuit;
@@ -21,6 +22,14 @@ export function LawsuitCard({ lawsuit, transactions }: LawsuitCardProps) {
           Math.ceil((new Date(lawsuit.deadline).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
         )
       : null;
+
+  const matchedTxns: MatchedTransaction[] = useMemo(
+    () =>
+      transactions && transactions.length > 0
+        ? findMatchingTransactions(transactions, lawsuit)
+        : [],
+    [transactions, lawsuit]
+  );
 
   return (
     <div className="py-6">
@@ -57,18 +66,34 @@ export function LawsuitCard({ lawsuit, transactions }: LawsuitCardProps) {
           <p className="text-sm text-muted-foreground mb-3">vs. {lawsuit.defendant}</p>
 
           {/* Chemical tags */}
-          <div className="flex flex-wrap gap-1.5">
-            {lawsuit.matchedChemicals.map((c) => (
-              <Badge key={c} variant="critical" className="text-[10px]">
-                {c}
-              </Badge>
-            ))}
-            {lawsuit.matchedProducts.map((p) => (
-              <Badge key={p} variant="outline" className="text-[10px] text-muted-foreground">
-                {p}
-              </Badge>
-            ))}
-          </div>
+          {lawsuit.matchedChemicals.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mb-2">
+              {lawsuit.matchedChemicals.map((c) => (
+                <Badge key={c} variant="critical" className="text-[10px]">
+                  {c}
+                </Badge>
+              ))}
+            </div>
+          )}
+
+          {/* Matched purchases: only show when real transaction products are found */}
+          {matchedTxns.length > 0 && (
+            <div className="space-y-0.5">
+              <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-semibold flex items-center gap-1 mb-1">
+                <ShoppingBag className="w-3 h-3" />
+                Matched purchase{matchedTxns.length > 1 ? "s" : ""}
+              </p>
+              {matchedTxns.map(({ txn, matched }) => (
+                <p key={txn.id} className="text-xs text-foreground/80 leading-snug">
+                  <span className="font-medium">{matched.map((p) => p.name).join(", ")}</span>
+                  <span className="text-muted-foreground">
+                    {" "}—{" "}{txn.merchant},{" "}
+                    {new Date(txn.datetime).toLocaleDateString("en-US", { month: "short", year: "numeric" })}
+                  </span>
+                </p>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Right: deadline + actions */}

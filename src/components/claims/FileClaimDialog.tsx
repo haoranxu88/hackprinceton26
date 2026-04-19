@@ -163,10 +163,10 @@ function TransactionReceiptRow({
               {formatDate(txn.datetime)}
             </span>
             <Badge variant="critical" className="text-[9px]">
-              Eligible
+              {matched.length > 1 ? `${matched.length} Eligible Items` : "Eligible"}
             </Badge>
           </div>
-          <p className="text-xs text-muted-foreground truncate">
+          <p className="text-xs text-muted-foreground line-clamp-2 leading-snug">
             {matched.map((p) => p.name).join(", ")}
           </p>
         </div>
@@ -372,7 +372,7 @@ export function FileClaimDialog({
                     </p>
                     {usingRealTxns && (
                       <p className="text-[11px] text-muted-foreground/80">
-                        Matching on: {lawsuit.matchedProducts.join(", ")}
+                        No purchases from your linked accounts matched {lawsuit.defendant} products.
                       </p>
                     )}
                   </div>
