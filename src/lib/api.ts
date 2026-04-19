@@ -184,6 +184,13 @@ export async function matchOpportunities(chemicals: string[]) {
   return invokeEdgeFunction("match-opportunities", { chemicals });
 }
 
+export async function getChemicalHealthEffects(chemicals: string[]) {
+  return invokeEdgeFunction<{ effects: { chemical: string; conditions: string[] }[] }>(
+    "chemical-health-effects",
+    { chemicals }
+  );
+}
+
 // ---------- Settlement pipeline ----------
 
 /** Manual kick: run discover then enrich. Cron runs these automatically every 4h / 1h. */
