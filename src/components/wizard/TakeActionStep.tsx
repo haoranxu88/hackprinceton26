@@ -2,12 +2,14 @@ import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { LawsuitCard } from "@/components/claims/LawsuitCard";
 import type { Lawsuit } from "@/data/mock-lawsuits";
+import type { Transaction } from "@/data/mock-transactions";
 import { RotateCcw } from "lucide-react";
 
 const EASE_EXPO = [0.16, 1, 0.3, 1] as const;
 
 interface TakeActionStepProps {
   lawsuits: Lawsuit[];
+  transactions: Transaction[];
   onRestart: () => void;
 }
 
@@ -21,10 +23,6 @@ const fadeUp = {
   show: { opacity: 1, y: 0, transition: { duration: 0.42, ease: EASE_EXPO } },
 };
 
-/**
- * Hide lawsuits whose claim deadline has already passed. TBD / pending / unparseable
- * deadlines are kept — they're still actionable, just not yet dated.
- */
 function isDeadlineStillOpen(deadline: string | undefined): boolean {
   if (!deadline) return true;
   const trimmed = deadline.trim();
@@ -36,7 +34,7 @@ function isDeadlineStillOpen(deadline: string | undefined): boolean {
   return ts >= today.getTime();
 }
 
-export function TakeActionStep({ lawsuits, onRestart }: TakeActionStepProps) {
+export function TakeActionStep({ lawsuits, transactions, onRestart }: TakeActionStepProps) {
   const visibleLawsuits = lawsuits.filter((l) => isDeadlineStillOpen(l.deadline));
   const sortedLawsuits = [...visibleLawsuits].sort((a, b) => {
     if (a.matchType === b.matchType) return 0;
@@ -79,7 +77,7 @@ export function TakeActionStep({ lawsuits, onRestart }: TakeActionStepProps) {
 
         <div className="divide-y divide-border">
           {sortedLawsuits.map((lawsuit) => (
-            <LawsuitCard key={lawsuit.id} lawsuit={lawsuit} />
+            <LawsuitCard key={lawsuit.id} lawsuit={lawsuit} transactions={transactions} />
           ))}
         </div>
       </motion.div>

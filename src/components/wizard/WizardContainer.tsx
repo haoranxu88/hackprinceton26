@@ -73,6 +73,7 @@ export function WizardContainer() {
           <TakeActionStep
             key="action"
             lawsuits={data.lawsuits}
+            transactions={data.transactions}
             onRestart={handleRestart}
           />
         )}
