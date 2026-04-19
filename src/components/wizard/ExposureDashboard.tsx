@@ -1,7 +1,6 @@
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ToxicLoadGauge } from "@/components/exposure/ToxicLoadGauge";
 import { ChemicalBreakdown } from "@/components/exposure/ChemicalBreakdown";
 import { ProductTimeline } from "@/components/exposure/ProductTimeline";
 import { RiskCategories } from "@/components/exposure/RiskCategories";
@@ -52,27 +51,11 @@ export function ExposureDashboard({ analysis, transactions, onNext, onBack }: Ex
 
         <p className="text-lg text-muted-foreground leading-relaxed mb-8" style={{ maxWidth: "58ch" }}>
           {analysis.chemicals.length} substances identified — including carcinogens and
-          endocrine disruptors. Your exposure places you in the{" "}
-          <span className="font-semibold text-foreground">{analysis.percentile}th percentile</span> of
-          users screened. You may have grounds for legal recourse.
+          endocrine disruptors. You may have grounds for legal recourse.
         </p>
 
         {/* Four-stat row */}
         <div className="flex flex-wrap gap-8 pt-8 border-t border-border">
-          <div>
-            <p className="font-display font-bold text-foreground text-3xl leading-none mb-1.5">
-              {analysis.overallScore}
-              <span className="text-lg text-muted-foreground font-normal">/100</span>
-            </p>
-            <p className="text-xs text-muted-foreground">Toxic Load Score</p>
-          </div>
-          <div>
-            <p className="font-display font-bold text-foreground text-3xl leading-none mb-1.5">
-              {analysis.percentile}
-              <span className="text-lg text-muted-foreground font-normal">th</span>
-            </p>
-            <p className="text-xs text-muted-foreground">Population percentile</p>
-          </div>
           <div>
             <p className="font-display font-bold text-foreground text-3xl leading-none mb-1.5">
               {analysis.chemicals.length}
@@ -104,14 +87,6 @@ export function ExposureDashboard({ analysis, transactions, onNext, onBack }: Ex
       {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-10">
         <motion.div variants={fadeUp} className="space-y-6">
-          <div>
-            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-4">
-              Toxic Load
-            </p>
-            <div className="flex justify-center">
-              <ToxicLoadGauge score={analysis.overallScore} percentile={analysis.percentile} />
-            </div>
-          </div>
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-4">
               Exposure Routes
