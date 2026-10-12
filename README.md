@@ -1,5 +1,9 @@
 # hackprinceton26 (Vigilant / LegalRedress AI)
 
+Won a track at Hack Princeton.
+
+Aletheia helps people turn everyday purchases into evidence: it screens what you buy against 4,500+ chemicals from the EPA database and matches you to class-action settlements you're eligible to claim ($230B in settlements over the last 4 years). An automated pipeline discovers settlements from ClassAction.org and Top Class Actions, enriches them with Gemini, and matches them to users.
+
 ## Autonomous settlement pipeline
 
 Settlements are stored in `public.settlements`. Two Edge Functions run the hybrid crawler:
